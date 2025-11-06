@@ -17,7 +17,7 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 - 🦀 **Code-first**: Generate specs from Rust types, not YAML
 - ⚡ **Compile-time**: Zero runtime cost, all generation at build time
 - 🔒 **Type-safe**: Compile errors if documentation drifts from code
-- 🎯 **Familiar**: Follows patterns from `utoipa`, `serde`, and `clap`
+- 🎯 **Familiar**: Follows patterns from [`utoipa`](https://crates.io/crates/utoipa), [`serde`](https://serde.rs), and [`clap`](https://crates.io/crates/clap)
 - 🌐 **Framework agnostic**: Works with actix-ws, axum, or any serde-compatible types
 - 📦 **Binary protocols**: Support for mixed text/binary WebSocket messages (Arrow IPC, Protobuf, etc.)
 

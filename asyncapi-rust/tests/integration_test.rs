@@ -1,4 +1,4 @@
-use asyncapi_rust::{ToAsyncApiMessage, schemars::JsonSchema};
+use asyncapi_rust::{AsyncApi, ToAsyncApiMessage, schemars::JsonSchema};
 use serde::{Deserialize, Serialize};
 
 // Test basic enum without serde attributes
@@ -167,4 +167,48 @@ fn test_asyncapi_attributes() {
         binary.content_type,
         Some("application/octet-stream".to_string())
     );
+}
+
+// Test AsyncApi derive macro
+#[derive(AsyncApi)]
+#[asyncapi(
+    title = "Test API",
+    version = "1.0.0",
+    description = "A test API specification"
+)]
+struct TestApi;
+
+#[test]
+fn test_asyncapi_derive() {
+    let spec = TestApi::asyncapi_spec();
+
+    // Verify basic fields
+    assert_eq!(spec.asyncapi, "3.0.0");
+    assert_eq!(spec.info.title, "Test API");
+    assert_eq!(spec.info.version, "1.0.0");
+    assert_eq!(
+        spec.info.description,
+        Some("A test API specification".to_string())
+    );
+
+    // Verify optional fields are None
+    assert!(spec.servers.is_none());
+    assert!(spec.channels.is_none());
+    assert!(spec.operations.is_none());
+    assert!(spec.components.is_none());
+}
+
+// Test AsyncApi without description
+#[derive(AsyncApi)]
+#[asyncapi(title = "Minimal API", version = "0.1.0")]
+struct MinimalApi;
+
+#[test]
+fn test_asyncapi_minimal() {
+    let spec = MinimalApi::asyncapi_spec();
+
+    assert_eq!(spec.asyncapi, "3.0.0");
+    assert_eq!(spec.info.title, "Minimal API");
+    assert_eq!(spec.info.version, "0.1.0");
+    assert_eq!(spec.info.description, None);
 }

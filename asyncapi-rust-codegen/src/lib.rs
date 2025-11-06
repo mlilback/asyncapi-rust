@@ -11,9 +11,11 @@ use quote::quote;
 use syn::{Data, DeriveInput, parse_macro_input};
 
 mod asyncapi_attrs;
+mod asyncapi_spec_attrs;
 mod serde_attrs;
 
 use asyncapi_attrs::extract_asyncapi_meta;
+use asyncapi_spec_attrs::extract_asyncapi_spec_meta;
 use serde_attrs::{extract_serde_rename, extract_serde_tag};
 
 /// Derive macro for generating AsyncAPI message metadata
@@ -204,6 +206,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 /// #[asyncapi(
 ///     title = "Chat API",
 ///     version = "1.0.0",
+///     description = "A real-time chat API"
 /// )]
 /// struct ChatApi;
 /// ```
@@ -212,15 +215,59 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
 
-    // TODO: Parse asyncapi attributes
-    // TODO: Generate AsyncApiSpec
+    // Extract asyncapi spec metadata
+    let spec_meta = extract_asyncapi_spec_meta(&input.attrs);
 
-    // Placeholder implementation
+    // Validate required fields
+    let title = match spec_meta.title {
+        Some(t) => t,
+        None => {
+            return syn::Error::new_spanned(
+                name,
+                "AsyncApi requires a title attribute: #[asyncapi(title = \"...\")]"
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    let version = match spec_meta.version {
+        Some(v) => v,
+        None => {
+            return syn::Error::new_spanned(
+                name,
+                "AsyncApi requires a version attribute: #[asyncapi(version = \"...\")]"
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    let description = if let Some(desc) = spec_meta.description {
+        quote! { Some(#desc.to_string()) }
+    } else {
+        quote! { None }
+    };
+
     let expanded = quote! {
         impl #name {
             /// Generate the AsyncAPI specification
-            pub fn asyncapi() -> String {
-                format!("AsyncAPI spec for {}", stringify!(#name))
+            ///
+            /// Returns a basic AsyncApiSpec with Info section populated.
+            /// Add servers, channels, and operations as needed.
+            pub fn asyncapi_spec() -> asyncapi_rust::AsyncApiSpec {
+                asyncapi_rust::AsyncApiSpec {
+                    asyncapi: "3.0.0".to_string(),
+                    info: asyncapi_rust::Info {
+                        title: #title.to_string(),
+                        version: #version.to_string(),
+                        description: #description,
+                    },
+                    servers: None,
+                    channels: None,
+                    operations: None,
+                    components: None,
+                }
             }
         }
     };
