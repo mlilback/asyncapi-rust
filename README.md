@@ -69,6 +69,43 @@ fn main() {
 }
 ```
 
+### Message Integration
+
+Combine message types into complete specifications using `#[asyncapi_messages(...)]`:
+
+```rust
+use asyncapi_rust::{AsyncApi, ToAsyncApiMessage, schemars::JsonSchema};
+use serde::{Deserialize, Serialize};
+
+// Define your message types
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+#[serde(tag = "type")]
+pub enum ChatMessage {
+    #[serde(rename = "user.join")]
+    UserJoin { username: String, room: String },
+
+    #[serde(rename = "chat.message")]
+    Chat { username: String, text: String },
+}
+
+// Reference message types in your API spec
+#[derive(AsyncApi)]
+#[asyncapi(title = "Chat API", version = "1.0.0")]
+#[asyncapi_messages(ChatMessage)]  // Automatically includes all messages
+struct ChatApi;
+
+fn main() {
+    let spec = ChatApi::asyncapi_spec();
+    // spec.components.messages now contains all ChatMessage variants
+    // with full JSON schemas
+}
+```
+
+The `#[asyncapi_messages(...)]` attribute automatically populates the `components/messages` section with:
+- All message definitions from referenced types
+- Complete JSON schemas generated from Rust types
+- Message metadata (name, summary, description, content-type)
+
 ## Examples
 
 See working examples in the `examples/` directory:
@@ -81,6 +118,11 @@ See working examples in the `examples/` directory:
 - **`chat_api.rs`** - Complete AsyncAPI 3.0 specification with server, channels, and operations
   ```bash
   cargo run --example chat_api
+  ```
+
+- **`message_integration.rs`** - Demonstrates automatic message integration with `#[asyncapi_messages(...)]`
+  ```bash
+  cargo run --example message_integration
   ```
 
 ## Motivation
@@ -214,12 +256,14 @@ The `examples/` directory contains working demonstrations:
 - **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
 - **`generate_spec_file.rs`** - Generating specification files
 - **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
+- **`message_integration.rs`** - Automatic message integration with `#[asyncapi_messages(...)]`
 - **`actix_websocket.rs`** - Real-world actix-web + actix-ws integration
 - **`axum_websocket.rs`** - Real-world axum WebSocket integration
 - **`framework_integration_guide.rs`** - Comprehensive framework integration guide
 
 Run any example:
 ```bash
+cargo run --example message_integration
 cargo run --example actix_websocket
 cargo run --example axum_websocket
 ```
