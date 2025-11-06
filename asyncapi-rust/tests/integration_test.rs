@@ -1,15 +1,15 @@
-use asyncapi_rust::ToAsyncApiMessage;
+use asyncapi_rust::{ToAsyncApiMessage, schemars::JsonSchema};
 use serde::{Deserialize, Serialize};
 
 // Test basic enum without serde attributes
-#[derive(Serialize, Deserialize, ToAsyncApiMessage)]
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
 pub enum BasicMessage {
     Ping,
     Pong,
 }
 
 // Test enum with serde tag
-#[derive(Serialize, Deserialize, ToAsyncApiMessage)]
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
 #[serde(tag = "type")]
 pub enum TaggedMessage {
     Echo { text: String },
@@ -17,7 +17,7 @@ pub enum TaggedMessage {
 }
 
 // Test enum with serde rename on variants
-#[derive(Serialize, Deserialize, ToAsyncApiMessage)]
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
 #[serde(tag = "message")]
 pub enum RenamedMessage {
     #[serde(rename = "user.join")]
@@ -29,7 +29,7 @@ pub enum RenamedMessage {
 }
 
 // Test struct
-#[derive(Serialize, Deserialize, ToAsyncApiMessage)]
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
 pub struct SimpleMessage {
     pub id: u64,
     pub text: String,
@@ -65,4 +65,36 @@ fn test_struct_message() {
     assert_eq!(names, vec!["SimpleMessage"]);
     assert_eq!(SimpleMessage::asyncapi_message_count(), 1);
     assert_eq!(SimpleMessage::asyncapi_tag_field(), None);
+}
+
+#[test]
+fn test_schema_generation() {
+    let messages = SimpleMessage::asyncapi_messages();
+    assert_eq!(messages.len(), 1);
+
+    let message = &messages[0];
+    assert_eq!(message.name, Some("SimpleMessage".to_string()));
+    assert_eq!(message.content_type, Some("application/json".to_string()));
+    assert!(message.payload.is_some());
+
+    // Verify the schema was generated
+    if let Some(schema) = &message.payload {
+        // Schema should have been converted from schemars output
+        // Just verify it exists - the exact structure depends on schemars
+        assert!(matches!(schema, asyncapi_rust::Schema::Object(_)));
+    }
+}
+
+#[test]
+fn test_enum_schema_generation() {
+    let messages = TaggedMessage::asyncapi_messages();
+    assert_eq!(messages.len(), 2);
+
+    // Each variant should have its own message
+    assert_eq!(messages[0].name, Some("Echo".to_string()));
+    assert_eq!(messages[1].name, Some("Broadcast".to_string()));
+
+    // Both should have schemas
+    assert!(messages[0].payload.is_some());
+    assert!(messages[1].payload.is_some());
 }

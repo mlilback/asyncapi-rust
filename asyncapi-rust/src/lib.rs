@@ -51,6 +51,7 @@ pub use asyncapi_rust_codegen::{AsyncApi, ToAsyncApiMessage};
 pub use asyncapi_rust_models::*;
 
 // Re-export commonly used types
+pub use schemars;
 pub use serde::{Deserialize, Serialize};
 pub use serde_json;
 

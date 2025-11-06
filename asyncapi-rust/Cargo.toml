@@ -19,10 +19,12 @@ asyncapi-rust-models = { version = "0.1.0", path = "../asyncapi-rust-models" }
 # Re-export commonly used dependencies
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 
 [dev-dependencies]
 # For testing generated code
 serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true, features = ["derive"] }
 
 [lib]
 name = "asyncapi_rust"

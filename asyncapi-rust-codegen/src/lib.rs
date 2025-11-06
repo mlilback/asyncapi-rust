@@ -93,6 +93,40 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
             pub fn asyncapi_tag_field() -> Option<&'static str> {
                 #tag_info
             }
+
+            /// Generate AsyncAPI Message objects with JSON schemas
+            ///
+            /// This method requires that the type implements `schemars::JsonSchema`.
+            pub fn asyncapi_messages() -> Vec<asyncapi_rust::Message>
+            where
+                Self: schemars::JsonSchema,
+            {
+                use schemars::schema_for;
+                use schemars::schema::RootSchema;
+
+                let message_names = Self::asyncapi_message_names();
+                let schema = schema_for!(Self);
+
+                // Convert schemars RootSchema to our Schema type
+                let schema_json = serde_json::to_value(&schema)
+                    .expect("Failed to serialize schema");
+
+                let payload_schema: asyncapi_rust::Schema = serde_json::from_value(schema_json)
+                    .expect("Failed to deserialize schema");
+
+                // Create a Message for each message name
+                message_names
+                    .iter()
+                    .map(|name| asyncapi_rust::Message {
+                        name: Some(name.to_string()),
+                        title: Some(name.to_string()),
+                        summary: None,
+                        description: None,
+                        content_type: Some("application/json".to_string()),
+                        payload: Some(payload_schema.clone()),
+                    })
+                    .collect()
+            }
         }
     };
 

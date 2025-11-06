@@ -165,16 +165,31 @@ pub struct Components {
 
 /// JSON Schema object
 ///
-/// Simplified representation - will be expanded as needed
+/// Flexible representation that can hold any valid JSON Schema.
+/// Uses serde_json::Value internally to support the full JSON Schema specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Schema {
+#[serde(untagged)]
+pub enum Schema {
+    /// Reference to another schema ($ref)
+    Reference {
+        /// $ref path
+        #[serde(rename = "$ref")]
+        reference: String,
+    },
+    /// Full schema object (boxed to reduce enum size)
+    Object(Box<SchemaObject>),
+}
+
+/// Schema object with all JSON Schema properties
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaObject {
     /// Schema type
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub schema_type: Option<String>,
 
     /// Properties (for object type)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<HashMap<String, Schema>>,
+    pub properties: Option<HashMap<String, Box<Schema>>>,
 
     /// Required properties
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -183,6 +198,45 @@ pub struct Schema {
     /// Description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Title
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Enum values
+    #[serde(rename = "enum", skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<serde_json::Value>>,
+
+    /// Const value
+    #[serde(rename = "const", skip_serializing_if = "Option::is_none")]
+    pub const_value: Option<serde_json::Value>,
+
+    /// Items schema (for array type)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<Box<Schema>>,
+
+    /// Additional properties
+    #[serde(
+        rename = "additionalProperties",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub additional_properties: Option<Box<Schema>>,
+
+    /// OneOf schemas
+    #[serde(rename = "oneOf", skip_serializing_if = "Option::is_none")]
+    pub one_of: Option<Vec<Schema>>,
+
+    /// AnyOf schemas
+    #[serde(rename = "anyOf", skip_serializing_if = "Option::is_none")]
+    pub any_of: Option<Vec<Schema>>,
+
+    /// AllOf schemas
+    #[serde(rename = "allOf", skip_serializing_if = "Option::is_none")]
+    pub all_of: Option<Vec<Schema>>,
+
+    /// Additional fields that may be present in the schema
+    #[serde(flatten)]
+    pub additional: HashMap<String, serde_json::Value>,
 }
 
 impl Default for AsyncApiSpec {
