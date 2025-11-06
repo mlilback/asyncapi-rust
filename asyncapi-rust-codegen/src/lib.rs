@@ -1,8 +1,174 @@
 //! Procedural macro implementation for asyncapi-rust
 //!
-//! This crate provides the proc macros used by asyncapi-rust:
-//! - `#[derive(ToAsyncApiMessage)]` - Generate message metadata from Rust types
-//! - `#[derive(AsyncApi)]` - Generate complete AsyncAPI spec
+//! This crate provides the procedural macros that power `asyncapi-rust`, enabling
+//! compile-time generation of AsyncAPI 3.0 specifications from Rust code.
+//!
+//! ## Overview
+//!
+//! Two derive macros are provided:
+//!
+//! ### `#[derive(ToAsyncApiMessage)]`
+//!
+//! Generates message metadata and JSON schemas from Rust types (structs or enums).
+//!
+//! - Works with [`serde`](https://serde.rs) for serialization patterns
+//! - Uses [`schemars`](https://docs.rs/schemars) for JSON Schema generation
+//! - Supports `#[asyncapi(...)]` helper attributes for documentation
+//! - Generates methods: `asyncapi_message_names()`, `asyncapi_messages()`, etc.
+//!
+//! **Example:**
+//! ```rust,ignore
+//! use asyncapi_rust::{ToAsyncApiMessage, schemars::JsonSchema};
+//! use serde::{Deserialize, Serialize};
+//!
+//! #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+//! #[serde(tag = "type")]
+//! pub enum ChatMessage {
+//!     #[serde(rename = "user.join")]
+//!     #[asyncapi(
+//!         summary = "User joins",
+//!         description = "Sent when a user enters a room"
+//!     )]
+//!     UserJoin { username: String, room: String },
+//!
+//!     #[serde(rename = "chat.message")]
+//!     #[asyncapi(summary = "Chat message")]
+//!     Chat { username: String, room: String, text: String },
+//! }
+//!
+//! // Generated methods available:
+//! let names = ChatMessage::asyncapi_message_names();
+//! let messages = ChatMessage::asyncapi_messages(); // Requires JsonSchema
+//! ```
+//!
+//! ### `#[derive(AsyncApi)]`
+//!
+//! Generates complete AsyncAPI 3.0 specifications with servers, channels, and operations.
+//!
+//! - Requires `title` and `version` attributes
+//! - Supports optional `description` attribute
+//! - Use `#[asyncapi_server(...)]` to define servers
+//! - Use `#[asyncapi_channel(...)]` to define channels
+//! - Use `#[asyncapi_operation(...)]` to define operations
+//! - Can use multiple of each attribute type
+//!
+//! **Example:**
+//! ```rust,ignore
+//! use asyncapi_rust::AsyncApi;
+//!
+//! #[derive(AsyncApi)]
+//! #[asyncapi(
+//!     title = "Chat API",
+//!     version = "1.0.0",
+//!     description = "Real-time chat application"
+//! )]
+//! #[asyncapi_server(
+//!     name = "production",
+//!     host = "chat.example.com",
+//!     protocol = "wss",
+//!     description = "Production WebSocket server"
+//! )]
+//! #[asyncapi_channel(
+//!     name = "chat",
+//!     address = "/ws/chat"
+//! )]
+//! #[asyncapi_operation(
+//!     name = "sendMessage",
+//!     action = "send",
+//!     channel = "chat"
+//! )]
+//! #[asyncapi_operation(
+//!     name = "receiveMessage",
+//!     action = "receive",
+//!     channel = "chat"
+//! )]
+//! struct ChatApi;
+//!
+//! // Generated method:
+//! let spec = ChatApi::asyncapi_spec();
+//! ```
+//!
+//! ## Supported Attributes
+//!
+//! ### `#[asyncapi(...)]` on message types
+//!
+//! Helper attributes for documenting messages (used with `ToAsyncApiMessage`):
+//!
+//! - `summary = "..."` - Short summary of the message
+//! - `description = "..."` - Detailed description
+//! - `title = "..."` - Human-readable title (defaults to message name)
+//! - `content_type = "..."` - Content type (defaults to "application/json")
+//! - `triggers_binary` - Flag for binary messages (sets content_type to "application/octet-stream")
+//!
+//! ### `#[asyncapi(...)]` on API specs
+//!
+//! Required attributes for complete specifications (used with `AsyncApi`):
+//!
+//! - `title = "..."` - API title (required)
+//! - `version = "..."` - API version (required)
+//! - `description = "..."` - API description (optional)
+//!
+//! ### `#[asyncapi_server(...)]`
+//!
+//! Define server connection information:
+//!
+//! - `name = "..."` - Server identifier (required)
+//! - `host = "..."` - Server host/URL (required)
+//! - `protocol = "..."` - Protocol (e.g., "wss", "ws", "grpc") (required)
+//! - `description = "..."` - Server description (optional)
+//!
+//! ### `#[asyncapi_channel(...)]`
+//!
+//! Define communication channels:
+//!
+//! - `name = "..."` - Channel identifier (required)
+//! - `address = "..."` - Channel path/address (optional)
+//!
+//! ### `#[asyncapi_operation(...)]`
+//!
+//! Define send/receive operations:
+//!
+//! - `name = "..."` - Operation identifier (required)
+//! - `action = "send"|"receive"` - Operation type (required)
+//! - `channel = "..."` - Channel reference (required)
+//!
+//! ## Integration with serde
+//!
+//! The macros respect serde attributes for naming and structure:
+//!
+//! - `#[serde(rename = "...")]` - Use custom name in AsyncAPI spec
+//! - `#[serde(tag = "...")]` - Tagged enum with discriminator field
+//! - `#[serde(skip)]` - Exclude fields from schema
+//! - `#[serde(skip_serializing_if = "...")]` - Optional fields
+//!
+//! ## Integration with schemars
+//!
+//! JSON schemas are generated automatically using schemars:
+//!
+//! - Requires `JsonSchema` derive on message types
+//! - Generates complete JSON Schema from Rust type definitions
+//! - Supports nested types, generics, and references
+//! - Schemas include validation rules from type constraints
+//!
+//! ## Generated Code
+//!
+//! The macros generate implementations with these methods:
+//!
+//! **From `ToAsyncApiMessage`:**
+//! - `asyncapi_message_names() -> Vec<&'static str>` - Get all message names
+//! - `asyncapi_message_count() -> usize` - Number of messages
+//! - `asyncapi_tag_field() -> Option<&'static str>` - Serde tag field if present
+//! - `asyncapi_messages() -> Vec<Message>` - Generate messages with schemas
+//!
+//! **From `AsyncApi`:**
+//! - `asyncapi_spec() -> AsyncApiSpec` - Generate complete specification
+//!
+//! ## Implementation Notes
+//!
+//! - All code generation happens at compile time (proc macros)
+//! - Zero runtime cost - generates plain Rust code
+//! - Compile errors if documentation drifts from code
+//! - Type-safe - uses Rust's type system for validation
 
 #![warn(clippy::all)]
 
