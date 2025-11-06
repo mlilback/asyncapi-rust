@@ -210,7 +210,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 /// )]
 /// struct ChatApi;
 /// ```
-#[proc_macro_derive(AsyncApi, attributes(asyncapi))]
+#[proc_macro_derive(AsyncApi, attributes(asyncapi, asyncapi_server, asyncapi_channel, asyncapi_operation))]
 pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -249,12 +249,124 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
         quote! { None }
     };
 
+    // Generate servers
+    let servers_code = if spec_meta.servers.is_empty() {
+        quote! { None }
+    } else {
+        let server_entries = spec_meta.servers.iter().map(|server| {
+            let name = &server.name;
+            let host = &server.host;
+            let protocol = &server.protocol;
+            let desc = if let Some(d) = &server.description {
+                quote! { Some(#d.to_string()) }
+            } else {
+                quote! { None }
+            };
+
+            quote! {
+                servers.insert(
+                    #name.to_string(),
+                    asyncapi_rust::Server {
+                        host: #host.to_string(),
+                        protocol: #protocol.to_string(),
+                        description: #desc,
+                    }
+                );
+            }
+        });
+
+        quote! {
+            {
+                let mut servers = std::collections::HashMap::new();
+                #(#server_entries)*
+                Some(servers)
+            }
+        }
+    };
+
+    // Generate channels
+    let channels_code = if spec_meta.channels.is_empty() {
+        quote! { None }
+    } else {
+        let channel_entries = spec_meta.channels.iter().map(|channel| {
+            let name = &channel.name;
+            let address = if let Some(addr) = &channel.address {
+                quote! { Some(#addr.to_string()) }
+            } else {
+                quote! { None }
+            };
+
+            quote! {
+                channels.insert(
+                    #name.to_string(),
+                    asyncapi_rust::Channel {
+                        address: #address,
+                        messages: None,
+                    }
+                );
+            }
+        });
+
+        quote! {
+            {
+                let mut channels = std::collections::HashMap::new();
+                #(#channel_entries)*
+                Some(channels)
+            }
+        }
+    };
+
+    // Generate operations
+    let operations_code = if spec_meta.operations.is_empty() {
+        quote! { None }
+    } else {
+        let operation_entries = spec_meta.operations.iter().map(|operation| {
+            let name = &operation.name;
+            let channel_ref = &operation.channel;
+            let action = &operation.action;
+
+            // Convert action string to OperationAction enum
+            let action_enum = if action == "send" {
+                quote! { asyncapi_rust::OperationAction::Send }
+            } else if action == "receive" {
+                quote! { asyncapi_rust::OperationAction::Receive }
+            } else {
+                return syn::Error::new_spanned(
+                    name,
+                    format!("Invalid action '{}', must be 'send' or 'receive'", action)
+                )
+                .to_compile_error();
+            };
+
+            quote! {
+                operations.insert(
+                    #name.to_string(),
+                    asyncapi_rust::Operation {
+                        action: #action_enum,
+                        channel: asyncapi_rust::ChannelRef {
+                            reference: format!("#/channels/{}", #channel_ref),
+                        },
+                        messages: None,
+                    }
+                );
+            }
+        });
+
+        quote! {
+            {
+                let mut operations = std::collections::HashMap::new();
+                #(#operation_entries)*
+                Some(operations)
+            }
+        }
+    };
+
     let expanded = quote! {
         impl #name {
             /// Generate the AsyncAPI specification
             ///
-            /// Returns a basic AsyncApiSpec with Info section populated.
-            /// Add servers, channels, and operations as needed.
+            /// Returns an AsyncApiSpec with Info, Servers, Channels, and Operations
+            /// sections populated from attributes.
             pub fn asyncapi_spec() -> asyncapi_rust::AsyncApiSpec {
                 asyncapi_rust::AsyncApiSpec {
                     asyncapi: "3.0.0".to_string(),
@@ -263,9 +375,9 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         version: #version.to_string(),
                         description: #description,
                     },
-                    servers: None,
-                    channels: None,
-                    operations: None,
+                    servers: #servers_code,
+                    channels: #channels_code,
+                    operations: #operations_code,
                     components: None,
                 }
             }

@@ -212,3 +212,57 @@ fn test_asyncapi_minimal() {
     assert_eq!(spec.info.version, "0.1.0");
     assert_eq!(spec.info.description, None);
 }
+
+// Test AsyncApi with servers, channels, and operations
+#[allow(clippy::duplicated_attributes)] // False positive - different operations can reference same channel
+#[derive(AsyncApi)]
+#[asyncapi(title = "Full API", version = "1.0.0", description = "Complete API spec")]
+#[asyncapi_server(name = "production", host = "api.example.com", protocol = "wss", description = "Production server")]
+#[asyncapi_server(name = "development", host = "localhost:8080", protocol = "ws")]
+#[asyncapi_channel(name = "chat", address = "/ws/chat")]
+#[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat")]
+#[asyncapi_operation(name = "receiveMessage", action = "receive", channel = "chat")]
+struct FullApi;
+
+#[test]
+fn test_asyncapi_full() {
+    let spec = FullApi::asyncapi_spec();
+
+    // Verify Info
+    assert_eq!(spec.info.title, "Full API");
+    assert_eq!(spec.info.version, "1.0.0");
+    assert_eq!(spec.info.description, Some("Complete API spec".to_string()));
+
+    // Verify Servers
+    let servers = spec.servers.expect("Should have servers");
+    assert_eq!(servers.len(), 2);
+
+    let prod_server = servers.get("production").expect("Should have production server");
+    assert_eq!(prod_server.host, "api.example.com");
+    assert_eq!(prod_server.protocol, "wss");
+    assert_eq!(prod_server.description, Some("Production server".to_string()));
+
+    let dev_server = servers.get("development").expect("Should have development server");
+    assert_eq!(dev_server.host, "localhost:8080");
+    assert_eq!(dev_server.protocol, "ws");
+    assert_eq!(dev_server.description, None);
+
+    // Verify Channels
+    let channels = spec.channels.expect("Should have channels");
+    assert_eq!(channels.len(), 1);
+
+    let chat_channel = channels.get("chat").expect("Should have chat channel");
+    assert_eq!(chat_channel.address, Some("/ws/chat".to_string()));
+
+    // Verify Operations
+    let operations = spec.operations.expect("Should have operations");
+    assert_eq!(operations.len(), 2);
+
+    let send_op = operations.get("sendMessage").expect("Should have sendMessage operation");
+    assert!(matches!(send_op.action, asyncapi_rust::OperationAction::Send));
+    assert_eq!(send_op.channel.reference, "#/channels/chat");
+
+    let receive_op = operations.get("receiveMessage").expect("Should have receiveMessage operation");
+    assert!(matches!(receive_op.action, asyncapi_rust::OperationAction::Receive));
+    assert_eq!(receive_op.channel.reference, "#/channels/chat");
+}
