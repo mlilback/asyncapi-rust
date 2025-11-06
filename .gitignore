@@ -18,6 +18,8 @@ Cargo.lock
 # Testing
 /examples/*/target/
 
-# Development notes (not committed)
+# Personal development files (not committed)
 .dev-notes.md
 .session-notes.md
+.update-notes-template.sh
+.*-notes.*  # Pattern for other personal note-related files
