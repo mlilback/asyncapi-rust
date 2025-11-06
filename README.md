@@ -29,55 +29,59 @@ Add to your `Cargo.toml`:
 [dependencies]
 asyncapi-rust = "0.1"
 serde = { version = "1.0", features = ["derive"] }
+schemars = { version = "0.8", features = ["derive"] }
 ```
 
 Define your WebSocket messages:
 
 ```rust
-use asyncapi_rust::{AsyncApi, ToAsyncApiMessage};
+use asyncapi_rust::{schemars::JsonSchema, ToAsyncApiMessage};
 use serde::{Deserialize, Serialize};
 
-/// Client → Server messages
-#[derive(Serialize, Deserialize, ToAsyncApiMessage)]
+/// WebSocket messages for a chat application
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
 #[serde(tag = "type")]
-pub enum ClientMessage {
+pub enum ChatMessage {
+    /// User joins a chat room
+    #[serde(rename = "user.join")]
+    UserJoin { username: String, room: String },
+
     /// Send a chat message
-    #[asyncapi(summary = "Send message to chat room")]
-    SendMessage { room: String, text: String },
-
-    /// Join a chat room
-    JoinRoom { room: String },
+    #[serde(rename = "chat.message")]
+    Chat { username: String, room: String, text: String },
 }
-
-/// Server → Client messages
-#[derive(Serialize, Deserialize, ToAsyncApiMessage)]
-#[serde(tag = "type")]
-pub enum ServerMessage {
-    /// New message from another user
-    MessageReceived { room: String, user: String, text: String },
-
-    /// Confirmation of room join
-    RoomJoined { room: String },
-}
-
-/// Generate the AsyncAPI specification
-#[derive(AsyncApi)]
-#[asyncapi(
-    title = "Chat WebSocket API",
-    version = "1.0.0",
-    description = "Real-time chat application",
-    server(name = "production", url = "wss://chat.example.com/ws"),
-)]
-struct ChatApi;
 
 fn main() {
-    // Get the generated spec
-    let spec = ChatApi::asyncapi();
+    // Get message names
+    let names = ChatMessage::asyncapi_message_names();
+    println!("Messages: {:?}", names); // ["user.join", "chat.message"]
 
-    // Serve it as JSON
-    println!("{}", serde_json::to_string_pretty(&spec).unwrap());
+    // Generate messages with JSON schemas
+    let messages = ChatMessage::asyncapi_messages();
+
+    // Each message includes:
+    // - name and title
+    // - contentType: "application/json"
+    // - payload: Full JSON Schema from schemars
+
+    let json = serde_json::to_string_pretty(&messages).unwrap();
+    println!("{}", json);
 }
 ```
+
+## Examples
+
+See working examples in the `examples/` directory:
+
+- **`simple.rs`** - Basic message types with schema generation
+  ```bash
+  cargo run --example simple
+  ```
+
+- **`chat_api.rs`** - Complete AsyncAPI 3.0 specification with server, channels, and operations
+  ```bash
+  cargo run --example chat_api
+  ```
 
 ## Motivation
 
