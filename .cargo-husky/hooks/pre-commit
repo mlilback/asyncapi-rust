@@ -1,0 +1,36 @@
+#!/bin/sh
+# Pre-commit hook: Check formatting and clippy before allowing commit
+# Installed via cargo-husky
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+echo ""
+
+# Check formatting
+echo "📝 Checking rustfmt..."
+if ! cargo fmt --all -- --check; then
+    echo ""
+    echo "❌ Formatting check failed!"
+    echo "💡 Run: cargo fmt --all"
+    echo ""
+    echo "To skip this check: git commit --no-verify"
+    exit 1
+fi
+echo "✅ Formatting check passed"
+echo ""
+
+# Run clippy
+echo "🔎 Running clippy..."
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
+    echo ""
+    echo "❌ Clippy check failed!"
+    echo "💡 Fix the warnings above"
+    echo ""
+    echo "To skip this check: git commit --no-verify"
+    exit 1
+fi
+echo "✅ Clippy check passed"
+echo ""
+
+echo "✅ All pre-commit checks passed!"

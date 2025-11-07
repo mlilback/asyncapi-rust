@@ -8,7 +8,58 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+echo -e "${BLUE}🔍 Running pre-release checks...${NC}"
+echo ""
+
+# Check formatting
+echo -e "${BLUE}📝 Checking code formatting...${NC}"
+if ! cargo fmt --all -- --check; then
+    echo ""
+    echo -e "${RED}❌ Formatting check failed!${NC}"
+    echo -e "${YELLOW}Run: cargo fmt --all${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Formatting check passed${NC}"
+echo ""
+
+# Check clippy
+echo -e "${BLUE}🔎 Running clippy...${NC}"
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
+    echo ""
+    echo -e "${RED}❌ Clippy check failed!${NC}"
+    echo "Fix the warnings above before releasing."
+    exit 1
+fi
+echo -e "${GREEN}✅ Clippy check passed${NC}"
+echo ""
+
+# Run tests
+echo -e "${BLUE}🧪 Running tests...${NC}"
+if ! cargo test --all-features; then
+    echo ""
+    echo -e "${RED}❌ Tests failed!${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ All tests passed${NC}"
+echo ""
+
+# Build documentation
+echo -e "${BLUE}📚 Checking documentation...${NC}"
+if ! cargo doc --all-features --no-deps; then
+    echo ""
+    echo -e "${RED}❌ Documentation build failed!${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Documentation builds successfully${NC}"
+echo ""
+
+echo -e "${GREEN}🎉 All pre-release checks passed!${NC}"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 
 # Check we're on main branch
 CURRENT_BRANCH=$(git branch --show-current)
