@@ -57,6 +57,7 @@ pub enum UserMessage {
 }
 
 /// Complete API specification with server variables and channel parameters
+#[allow(clippy::duplicated_attributes)] // Both operations use the same channel - this is intentional
 #[derive(AsyncApi)]
 #[asyncapi(
     title = "User WebSocket API",
@@ -115,11 +116,7 @@ pub enum UserMessage {
         format = "int64"
     )
 )]
-#[asyncapi_operation(
-    name = "subscribeToUpdates",
-    action = "send",
-    channel = "userMessaging"
-)]
+#[asyncapi_operation(name = "subscribeToUpdates", action = "send", channel = "userMessaging")]
 #[asyncapi_operation(name = "receiveUpdates", action = "receive", channel = "userMessaging")]
 #[asyncapi_messages(UserMessage)]
 struct UserApi;

@@ -35,7 +35,7 @@ fn main() {
             // Try deserializing as SchemaObject directly
             println!("\n=== Trying as SchemaObject directly ===");
             match serde_json::from_value::<asyncapi_rust::SchemaObject>(schema_value.clone()) {
-                Ok(obj) => println!("✅ SchemaObject deserialization worked!"),
+                Ok(_obj) => println!("✅ SchemaObject deserialization worked!"),
                 Err(e) => println!("❌ SchemaObject also failed: {}", e),
             }
         }
