@@ -175,6 +175,11 @@ See working examples in the `examples/` directory:
   cargo run --example message_integration
   ```
 
+- **`server_variables.rs`** - Server variables and channel parameters for dynamic paths
+  ```bash
+  cargo run --example server_variables
+  ```
+
 ## Motivation
 
 Manually maintaining AsyncAPI specifications is error-prone and time-consuming:
