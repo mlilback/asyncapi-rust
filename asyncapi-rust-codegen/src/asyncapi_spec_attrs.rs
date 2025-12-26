@@ -62,6 +62,7 @@ pub struct OperationMeta {
     pub channel: String,
     #[allow(dead_code)] // Reserved for future use
     pub description: Option<String>,
+    pub messages: Vec<Path>,
 }
 
 /// Extract asyncapi spec metadata from `#[asyncapi(...)]` attributes
@@ -299,10 +300,14 @@ fn extract_channel_parameter(nested: &syn::meta::ParseNestedMeta) -> Option<Para
 
 /// Extract operation metadata from `#[asyncapi_operation(...)]` attribute
 fn extract_operation(attr: &Attribute) -> Option<OperationMeta> {
+    use syn::Token;
+    use syn::punctuated::Punctuated;
+
     let mut name = None;
     let mut action = None;
     let mut channel = None;
     let mut description = None;
+    let mut messages = Vec::new();
 
     let _ = attr.parse_nested_meta(|nested| {
         if nested.path.is_ident("name") {
@@ -321,6 +326,14 @@ fn extract_operation(attr: &Attribute) -> Option<OperationMeta> {
             let value = nested.value()?;
             let s: syn::LitStr = value.parse()?;
             description = Some(s.value());
+        } else if nested.path.is_ident("messages") {
+            // Parse array of type paths: messages = [Type1, Type2, ...]
+            let _ = nested.value()?; // Parse the equals sign and prepare for value parsing
+            let content;
+            syn::bracketed!(content in nested.input);
+            let types: Punctuated<Path, Token![,]> =
+                content.parse_terminated(|stream| stream.parse(), Token![,])?;
+            messages = types.into_iter().collect();
         }
         Ok(())
     });
@@ -331,6 +344,7 @@ fn extract_operation(attr: &Attribute) -> Option<OperationMeta> {
         action: action?,
         channel: channel?,
         description,
+        messages,
     })
 }
 
@@ -605,5 +619,54 @@ mod tests {
         assert_eq!(param1.name, "userId");
         assert_eq!(param1.schema_type, Some("integer".to_string()));
         assert_eq!(param1.format, Some("int64".to_string()));
+    }
+
+    #[test]
+    fn test_extract_operation_with_messages() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", messages = [ChatMessage])]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.operations.len(), 1);
+        assert_eq!(meta.operations[0].name, "sendMessage");
+        assert_eq!(meta.operations[0].action, "send");
+        assert_eq!(meta.operations[0].channel, "chat");
+        assert_eq!(meta.operations[0].messages.len(), 1);
+        let path0 = &meta.operations[0].messages[0];
+        assert_eq!(quote!(#path0).to_string(), "ChatMessage");
+    }
+
+    #[test]
+    fn test_extract_operation_with_multiple_messages() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", messages = [ChatMessage, SystemMessage])]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.operations.len(), 1);
+        assert_eq!(meta.operations[0].messages.len(), 2);
+        let path0 = &meta.operations[0].messages[0];
+        let path1 = &meta.operations[0].messages[1];
+        assert_eq!(quote!(#path0).to_string(), "ChatMessage");
+        assert_eq!(quote!(#path1).to_string(), "SystemMessage");
+    }
+
+    #[test]
+    fn test_extract_operation_with_module_path_messages() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", messages = [super::messages::ChatMessage, crate::SystemMessage])]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.operations.len(), 1);
+        assert_eq!(meta.operations[0].messages.len(), 2);
+        let path0 = &meta.operations[0].messages[0];
+        let path1 = &meta.operations[0].messages[1];
+        assert_eq!(
+            quote!(#path0).to_string(),
+            "super :: messages :: ChatMessage"
+        );
+        assert_eq!(quote!(#path1).to_string(), "crate :: SystemMessage");
     }
 }

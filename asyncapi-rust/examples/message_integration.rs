@@ -59,6 +59,12 @@ pub enum SystemMessage {
 ///
 /// The #[asyncapi_messages(...)] attribute automatically includes
 /// message definitions from the specified types in the components section.
+/// The messages parameter in operations specifies which messages can be used,
+/// and these messages are automatically added to the channel that the operation references.
+///
+/// Per AsyncAPI 3.0 spec:
+/// - Operations reference channel messages: #/channels/{channel}/messages/{message}
+/// - Channels reference component messages: #/components/messages/{message}
 #[allow(clippy::duplicated_attributes)]
 #[derive(AsyncApi)]
 #[asyncapi(
@@ -73,8 +79,8 @@ pub enum SystemMessage {
     description = "Production WebSocket server"
 )]
 #[asyncapi_channel(name = "chat", address = "/ws/chat")]
-#[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat")]
-#[asyncapi_operation(name = "receiveMessage", action = "receive", channel = "chat")]
+#[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", messages = [ChatMessage])]
+#[asyncapi_operation(name = "receiveMessage", action = "receive", channel = "chat", messages = [ChatMessage, SystemMessage])]
 #[asyncapi_messages(ChatMessage, SystemMessage)]
 struct ChatApi;
 
@@ -107,6 +113,14 @@ fn main() {
             if let Some(address) = &channel.address {
                 println!("  - {}: {}", name, address);
             }
+            if let Some(messages) = &channel.messages {
+                println!("    Channel Messages:");
+                for (msg_name, msg_ref) in messages {
+                    if let asyncapi_rust::MessageRef::Reference { reference } = msg_ref {
+                        println!("      - {}: {}", msg_name, reference);
+                    }
+                }
+            }
         }
         println!();
     }
@@ -123,6 +137,14 @@ fn main() {
                 "  - {}: {} to {}",
                 name, action, operation.channel.reference
             );
+            if let Some(messages) = &operation.messages {
+                println!("    Messages:");
+                for msg in messages {
+                    if let asyncapi_rust::MessageRef::Reference { reference } = msg {
+                        println!("      - {}", reference);
+                    }
+                }
+            }
         }
         println!();
     }

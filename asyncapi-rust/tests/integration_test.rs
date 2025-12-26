@@ -118,13 +118,59 @@ fn test_enum_schema_generation() {
     let messages = TaggedMessage::asyncapi_messages();
     assert_eq!(messages.len(), 2);
 
-    // Each variant should have its own message
-    assert_eq!(messages[0].name, Some("Echo".to_string()));
-    assert_eq!(messages[1].name, Some("Broadcast".to_string()));
+    // Find messages by name (more maintainable than hard-coded indices)
+    let echo_msg = messages
+        .iter()
+        .find(|m| m.name.as_ref().is_some_and(|n| n == "Echo"))
+        .expect("Echo message should exist");
+
+    let broadcast_msg = messages
+        .iter()
+        .find(|m| m.name.as_ref().is_some_and(|n| n == "Broadcast"))
+        .expect("Broadcast message should exist");
 
     // Both should have schemas
-    assert!(messages[0].payload.is_some());
-    assert!(messages[1].payload.is_some());
+    assert!(echo_msg.payload.is_some());
+    assert!(broadcast_msg.payload.is_some());
+
+    // Verify that each message has ONLY its specific variant schema (no oneOf)
+    // Convert to JSON to inspect the structure
+    let echo_payload_json = serde_json::to_value(&echo_msg.payload).unwrap();
+    let broadcast_payload_json = serde_json::to_value(&broadcast_msg.payload).unwrap();
+
+    // Echo message should NOT have oneOf at the top level
+    assert!(
+        echo_payload_json.get("oneOf").is_none(),
+        "Echo message should not have oneOf in its schema"
+    );
+
+    // Broadcast message should NOT have oneOf at the top level
+    assert!(
+        broadcast_payload_json.get("oneOf").is_none(),
+        "Broadcast message should not have oneOf in its schema"
+    );
+
+    // Echo message should have the const value "Echo" in its type property
+    if let Some(properties) = echo_payload_json.get("properties") {
+        if let Some(type_prop) = properties.get("type") {
+            assert_eq!(
+                type_prop.get("const"),
+                Some(&serde_json::json!("Echo")),
+                "Echo message should have const 'Echo' in type property"
+            );
+        }
+    }
+
+    // Broadcast message should have the const value "Broadcast" in its type property
+    if let Some(properties) = broadcast_payload_json.get("properties") {
+        if let Some(type_prop) = properties.get("type") {
+            assert_eq!(
+                type_prop.get("const"),
+                Some(&serde_json::json!("Broadcast")),
+                "Broadcast message should have const 'Broadcast' in type property"
+            );
+        }
+    }
 }
 
 #[test]
@@ -361,4 +407,89 @@ fn test_asyncapi_with_messages() {
         .expect("Should have system.status message");
     assert_eq!(system_status.name, Some("system.status".to_string()));
     assert_eq!(system_status.summary, Some("System status".to_string()));
+}
+
+#[test]
+fn test_asyncapi_operation_with_messages() {
+    // Define message types for operations
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum ChatMessage {
+        #[serde(rename = "user.join")]
+        UserJoin { username: String, room: String },
+        #[serde(rename = "chat.message")]
+        ChatMessage { username: String, text: String },
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum SystemMessage {
+        #[serde(rename = "system.status")]
+        Status { status: String },
+    }
+
+    // Define API with operations that specify messages
+    #[allow(clippy::duplicated_attributes)]
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Chat API", version = "1.0.0")]
+    #[asyncapi_channel(name = "chat", address = "/ws/chat")]
+    #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", messages = [ChatMessage])]
+    #[asyncapi_operation(name = "receiveMessage", action = "receive", channel = "chat", messages = [ChatMessage, SystemMessage])]
+    #[asyncapi_messages(ChatMessage, SystemMessage)]
+    struct ChatApi;
+
+    let spec = ChatApi::asyncapi_spec();
+
+    // Verify operations exist
+    let operations = spec.operations.expect("Should have operations");
+    assert_eq!(operations.len(), 2);
+
+    // Verify sendMessage operation has messages
+    let send_op = operations
+        .get("sendMessage")
+        .expect("Should have sendMessage operation");
+    assert!(send_op.messages.is_some());
+    let send_messages = send_op.messages.as_ref().unwrap();
+    assert_eq!(send_messages.len(), 2); // ChatMessage has 2 variants
+
+    // Verify receiveMessage operation has messages
+    let receive_op = operations
+        .get("receiveMessage")
+        .expect("Should have receiveMessage operation");
+    assert!(receive_op.messages.is_some());
+    let receive_messages = receive_op.messages.as_ref().unwrap();
+    assert_eq!(receive_messages.len(), 3); // ChatMessage (2 variants) + SystemMessage (1 variant)
+
+    // Verify operation message references point to channel messages (not components directly)
+    match &send_messages[0] {
+        asyncapi_rust::MessageRef::Reference { reference } => {
+            assert!(
+                reference == "#/channels/chat/messages/user.join"
+                    || reference == "#/channels/chat/messages/chat.message"
+            );
+        }
+        _ => panic!("Expected message reference"),
+    }
+
+    // Verify channels exist and have messages
+    let channels = spec.channels.expect("Should have channels");
+    assert_eq!(channels.len(), 1);
+
+    let chat_channel = channels.get("chat").expect("Should have chat channel");
+    assert!(chat_channel.messages.is_some());
+    let channel_messages = chat_channel.messages.as_ref().unwrap();
+    assert_eq!(channel_messages.len(), 3); // All unique messages from both operations
+
+    // Verify channel messages reference components directly
+    assert!(channel_messages.contains_key("user.join"));
+    assert!(channel_messages.contains_key("chat.message"));
+    assert!(channel_messages.contains_key("system.status"));
+
+    // Verify channel messages reference components (not other channels)
+    match channel_messages.get("user.join").unwrap() {
+        asyncapi_rust::MessageRef::Reference { reference } => {
+            assert_eq!(reference, "#/components/messages/user.join");
+        }
+        _ => panic!("Expected message reference"),
+    }
 }

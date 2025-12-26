@@ -75,13 +75,16 @@
 //! #[asyncapi_operation(
 //!     name = "sendMessage",
 //!     action = "send",
-//!     channel = "chat"
+//!     channel = "chat",
+//!     messages = [ChatMessage]
 //! )]
 //! #[asyncapi_operation(
 //!     name = "receiveMessage",
 //!     action = "receive",
-//!     channel = "chat"
+//!     channel = "chat",
+//!     messages = [ChatMessage, SystemMessage]
 //! )]
+//! #[asyncapi_messages(ChatMessage, SystemMessage)]
 //! struct ChatApi;
 //!
 //! // Generated method:
@@ -131,6 +134,12 @@
 //! - `name = "..."` - Operation identifier (required)
 //! - `action = "send"|"receive"` - Operation type (required)
 //! - `channel = "..."` - Channel reference (required)
+//! - `messages = [Type1, Type2, ...]` - Message types available for this operation (optional)
+//!
+//! When the `messages` parameter is specified on operations, those messages are automatically
+//! added to the channel that the operation references. Operation messages reference the channel's
+//! messages (e.g., `#/channels/{channel}/messages/{message}`), while channel messages reference
+//! the components section (e.g., `#/components/messages/{message}`), following AsyncAPI 3.0 spec.
 //!
 //! ## Integration with serde
 //!
@@ -219,7 +228,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
     }
 
     // Parse enum variants or struct
-    let messages = match &input.data {
+    let (messages, _is_enum) = match &input.data {
         Data::Enum(data_enum) => {
             let mut message_metas = Vec::new();
 
@@ -243,20 +252,23 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                 });
             }
 
-            message_metas
+            (message_metas, true)
         }
         Data::Struct(_) => {
             // For structs, extract metadata from the struct itself
             let asyncapi_meta = extract_asyncapi_meta(&input.attrs);
 
-            vec![MessageMeta {
-                name: name.to_string(),
-                summary: asyncapi_meta.summary,
-                description: asyncapi_meta.description,
-                title: asyncapi_meta.title,
-                content_type: asyncapi_meta.content_type,
-                triggers_binary: asyncapi_meta.triggers_binary,
-            }]
+            (
+                vec![MessageMeta {
+                    name: name.to_string(),
+                    summary: asyncapi_meta.summary,
+                    description: asyncapi_meta.description,
+                    title: asyncapi_meta.title,
+                    content_type: asyncapi_meta.content_type,
+                    triggers_binary: asyncapi_meta.triggers_binary,
+                }],
+                false,
+            )
         }
         Data::Union(_) => {
             return syn::Error::new_spanned(name, "ToAsyncApiMessage cannot be derived for unions")
@@ -338,22 +350,79 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 
                 let schema = schema_for!(Self);
 
-                // Convert schemars RootSchema to our Schema type
+                // Convert schemars RootSchema to JSON
                 let schema_json = serde_json::to_value(&schema)
                     .expect("Failed to serialize schema");
 
-                let payload_schema: asyncapi_rust::Schema = serde_json::from_value(schema_json)
-                    .expect("Failed to deserialize schema");
+                // For enums, extract individual variant schemas from oneOf
+                let variant_schemas = if let Some(one_of_array) = schema_json.get("oneOf") {
+                    if let Some(variants) = one_of_array.as_array() {
+                        // Create a map of variant name to its schema with capacity
+                        let mut variant_map = std::collections::HashMap::with_capacity(variants.len());
+
+                        for variant in variants {
+                            // Extract the const value from the type field
+                            if let Some(properties) = variant.get("properties") {
+                                if let Some(type_prop) = properties.get("type") {
+                                    if let Some(const_val) = type_prop.get("const") {
+                                        if let Some(variant_name) = const_val.as_str() {
+                                            // Convert this variant to a Schema
+                                            // Note: clone is necessary here because we need ownership
+                                            // of the JSON value to deserialize it
+                                            let variant_schema: asyncapi_rust::Schema =
+                                                serde_json::from_value(variant.clone())
+                                                    .unwrap_or_else(|e| panic!(
+                                                        "Failed to deserialize schema for variant '{}': {}",
+                                                        variant_name, e
+                                                    ));
+                                            variant_map.insert(variant_name.to_string(), variant_schema);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Some(variant_map)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
                 // Create messages with metadata
-                vec![#(asyncapi_rust::Message {
-                    name: Some(#message_names_for_gen.to_string()),
-                    title: #message_titles,
-                    summary: #message_summaries,
-                    description: #message_descriptions,
-                    content_type: #message_content_types,
-                    payload: Some(payload_schema.clone()),
-                }),*]
+                let message_names = vec![#(#message_names_for_gen),*];
+                let message_titles = vec![#(#message_titles),*];
+                let message_summaries = vec![#(#message_summaries),*];
+                let message_descriptions = vec![#(#message_descriptions),*];
+                let message_content_types = vec![#(#message_content_types),*];
+
+                let mut messages = Vec::new();
+                for i in 0..message_names.len() {
+                    let msg_name = message_names[i];
+
+                    // For enums, try to find the specific variant schema
+                    let msg_payload = if let Some(ref variant_schemas) = variant_schemas {
+                        // Try to get the specific variant schema for this message
+                        variant_schemas.get(msg_name).cloned()
+                    } else {
+                        // For structs, deserialize and use the full schema
+                        let payload_schema: asyncapi_rust::Schema = serde_json::from_value(schema_json.clone())
+                            .expect("Failed to deserialize schema");
+                        Some(payload_schema)
+                    };
+
+                    messages.push(asyncapi_rust::Message {
+                        name: Some(msg_name.to_string()),
+                        title: message_titles[i].clone(),
+                        summary: message_summaries[i].clone(),
+                        description: message_descriptions[i].clone(),
+                        content_type: message_content_types[i].clone(),
+                        payload: msg_payload,
+                    });
+                }
+
+                messages
             }
         }
     };
@@ -596,12 +665,50 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 }
             };
 
+            // Collect messages from all operations that reference this channel
+            let channel_name_str = name.as_str();
+            let operations_for_channel: Vec<_> = spec_meta.operations.iter()
+                .filter(|op| op.channel == channel_name_str)
+                .collect();
+
+            let messages_field = if operations_for_channel.is_empty() ||
+                                   operations_for_channel.iter().all(|op| op.messages.is_empty()) {
+                quote! { None }
+            } else {
+                let message_calls: Vec<_> = operations_for_channel.iter()
+                    .flat_map(|op| &op.messages)
+                    .collect::<std::collections::HashSet<_>>() // Deduplicate
+                    .into_iter()
+                    .map(|type_name| {
+                        quote! {
+                            // Call asyncapi_message_names() for this type and add references
+                            for msg_name in #type_name::asyncapi_message_names() {
+                                channel_messages.insert(
+                                    msg_name.to_string(),
+                                    asyncapi_rust::MessageRef::Reference {
+                                        reference: format!("#/components/messages/{}", msg_name),
+                                    }
+                                );
+                            }
+                        }
+                    })
+                    .collect();
+
+                quote! {
+                    {
+                        let mut channel_messages = std::collections::HashMap::new();
+                        #(#message_calls)*
+                        Some(channel_messages)
+                    }
+                }
+            };
+
             quote! {
                 channels.insert(
                     #name.to_string(),
                     asyncapi_rust::Channel {
                         address: #address,
-                        messages: None,
+                        messages: #messages_field,
                         parameters: #parameters,
                     }
                 );
@@ -639,6 +746,30 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 .to_compile_error();
             };
 
+            // Generate messages references if any messages are specified
+            let messages_field = if operation.messages.is_empty() {
+                quote! { None }
+            } else {
+                let message_calls = operation.messages.iter().map(|type_name| {
+                    quote! {
+                        // Call asyncapi_message_names() for this type and add references to channel messages
+                        for msg_name in #type_name::asyncapi_message_names() {
+                            message_refs.push(asyncapi_rust::MessageRef::Reference {
+                                reference: format!("#/channels/{}/messages/{}", #channel_ref, msg_name),
+                            });
+                        }
+                    }
+                });
+
+                quote! {
+                    {
+                        let mut message_refs = Vec::new();
+                        #(#message_calls)*
+                        Some(message_refs)
+                    }
+                }
+            };
+
             quote! {
                 operations.insert(
                     #name.to_string(),
@@ -647,7 +778,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         channel: asyncapi_rust::ChannelRef {
                             reference: format!("#/channels/{}", #channel_ref),
                         },
-                        messages: None,
+                        messages: #messages_field,
                     }
                 );
             }
