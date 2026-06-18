@@ -337,23 +337,74 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                 use schemars::schema_for;
 
                 let schema = schema_for!(Self);
-
-                // Convert schemars RootSchema to our Schema type
                 let schema_json = serde_json::to_value(&schema)
                     .expect("Failed to serialize schema");
 
-                let payload_schema: asyncapi_rust::Schema = serde_json::from_value(schema_json)
-                    .expect("Failed to deserialize schema");
+                // Extract shared $defs so each per-variant schema can be self-contained.
+                let root_defs = schema_json.get("$defs").cloned();
 
-                // Create messages with metadata
-                vec![#(asyncapi_rust::Message {
-                    name: Some(#message_names_for_gen.to_string()),
-                    title: #message_titles,
-                    summary: #message_summaries,
-                    description: #message_descriptions,
-                    content_type: #message_content_types,
-                    payload: Some(payload_schema.clone()),
-                }),*]
+                // Build a discriminant→schema map using the actual serde tag field name.
+                // This gives each message its own variant schema instead of the whole-enum
+                // oneOf, and embeds $defs so cross-variant $refs resolve correctly.
+                let tag_field = Self::asyncapi_tag_field();
+                let mut variant_schemas: std::collections::HashMap<String, serde_json::Value> =
+                    std::collections::HashMap::new();
+                if let Some(tag) = tag_field {
+                    if let Some(variants) = schema_json.get("oneOf").and_then(|v| v.as_array()) {
+                        for variant in variants {
+                            let discriminant = variant
+                                .get("properties")
+                                .and_then(|props| props.get(tag))
+                                .and_then(|tag_prop| {
+                                    tag_prop.get("const").or_else(|| {
+                                        tag_prop
+                                            .get("enum")
+                                            .and_then(|e| e.as_array())
+                                            .and_then(|a| a.first())
+                                    })
+                                })
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+
+                            if let Some(name) = discriminant {
+                                let mut variant_schema = variant.clone();
+                                if let (Some(obj), Some(defs)) =
+                                    (variant_schema.as_object_mut(), &root_defs)
+                                {
+                                    obj.insert("$defs".to_string(), defs.clone());
+                                }
+                                variant_schemas.insert(name, variant_schema);
+                            }
+                        }
+                    }
+                }
+
+                // Metadata arrays are baked in at compile time; schemas are resolved at runtime.
+                let names: &[&str] = &[#(#message_names_for_gen),*];
+                let titles: &[Option<String>] = &[#(#message_titles),*];
+                let summaries: &[Option<String>] = &[#(#message_summaries),*];
+                let descriptions: &[Option<String>] = &[#(#message_descriptions),*];
+                let content_types: &[Option<String>] = &[#(#message_content_types),*];
+
+                let mut messages = Vec::with_capacity(names.len());
+                for i in 0..names.len() {
+                    let msg_name = names[i];
+                    let payload = if let Some(v) = variant_schemas.get(msg_name) {
+                        serde_json::from_value(v.clone()).ok()
+                    } else {
+                        // Structs, untagged enums, or any variant not found in the map
+                        serde_json::from_value(schema_json.clone()).ok()
+                    };
+                    messages.push(asyncapi_rust::Message {
+                        name: Some(msg_name.to_string()),
+                        title: titles[i].clone(),
+                        summary: summaries[i].clone(),
+                        description: descriptions[i].clone(),
+                        content_type: content_types[i].clone(),
+                        payload,
+                    });
+                }
+                messages
             }
         }
     };

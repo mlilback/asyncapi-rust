@@ -118,13 +118,88 @@ fn test_enum_schema_generation() {
     let messages = TaggedMessage::asyncapi_messages();
     assert_eq!(messages.len(), 2);
 
-    // Each variant should have its own message
-    assert_eq!(messages[0].name, Some("Echo".to_string()));
-    assert_eq!(messages[1].name, Some("Broadcast".to_string()));
+    let echo = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("Echo"))
+        .expect("Echo message should exist");
+    let broadcast = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("Broadcast"))
+        .expect("Broadcast message should exist");
 
-    // Both should have schemas
-    assert!(messages[0].payload.is_some());
-    assert!(messages[1].payload.is_some());
+    // Each message must carry only its own variant schema — no top-level oneOf
+    let echo_json = serde_json::to_value(&echo.payload).unwrap();
+    let broadcast_json = serde_json::to_value(&broadcast.payload).unwrap();
+
+    assert!(
+        echo_json.get("oneOf").is_none(),
+        "Echo payload must not be the whole-enum oneOf"
+    );
+    assert!(
+        broadcast_json.get("oneOf").is_none(),
+        "Broadcast payload must not be the whole-enum oneOf"
+    );
+
+    // Each payload must contain the const for its own discriminant only
+    let echo_type_const = echo_json
+        .pointer("/properties/type/const")
+        .and_then(|v| v.as_str());
+    assert_eq!(echo_type_const, Some("Echo"));
+
+    let broadcast_type_const = broadcast_json
+        .pointer("/properties/type/const")
+        .and_then(|v| v.as_str());
+    assert_eq!(broadcast_type_const, Some("Broadcast"));
+}
+
+// Regression for #6: per-variant schemas work with a non-"type" tag field name
+#[test]
+fn test_per_variant_schema_non_type_tag() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "message")]
+    pub enum ChannelEvent {
+        #[serde(rename = "channel-list")]
+        ChannelList { channels: Vec<String> },
+        #[serde(rename = "data-changed")]
+        DataChanged { project_id: i64 },
+    }
+
+    let messages = ChannelEvent::asyncapi_messages();
+    assert_eq!(messages.len(), 2);
+
+    let channel_list = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("channel-list"))
+        .expect("channel-list should exist");
+    let data_changed = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("data-changed"))
+        .expect("data-changed should exist");
+
+    let cl_json = serde_json::to_value(&channel_list.payload).unwrap();
+    let dc_json = serde_json::to_value(&data_changed.payload).unwrap();
+
+    // Must be per-variant, not the whole union
+    assert!(cl_json.get("oneOf").is_none());
+    assert!(dc_json.get("oneOf").is_none());
+
+    // Discriminant must match (tag field is "message", not "type")
+    assert_eq!(
+        cl_json
+            .pointer("/properties/message/const")
+            .and_then(|v| v.as_str()),
+        Some("channel-list")
+    );
+    assert_eq!(
+        dc_json
+            .pointer("/properties/message/const")
+            .and_then(|v| v.as_str()),
+        Some("data-changed")
+    );
+
+    // channel-list payload must have "channels", not "project_id"
+    assert!(cl_json.pointer("/properties/channels").is_some());
+    assert!(cl_json.pointer("/properties/project_id").is_none());
 }
 
 #[test]
