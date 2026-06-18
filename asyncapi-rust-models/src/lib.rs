@@ -573,6 +573,13 @@ pub enum Schema {
     ///
     /// Contains a complete JSON Schema definition with all properties inline
     Object(Box<SchemaObject>),
+    /// Catch-all for valid JSON Schemas that don't match the above variants
+    ///
+    /// Handles minimal schemas like `{}`, `{"title": "..."}`, or boolean schemas
+    /// (`true`/`false`) that are valid per the JSON Schema spec but carry no
+    /// structural information. `schemars` emits these for open-ended types such
+    /// as `serde_json::Value`.
+    Any(serde_json::Value),
 }
 
 /// Schema object with all JSON Schema properties

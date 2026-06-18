@@ -362,3 +362,36 @@ fn test_asyncapi_with_messages() {
     assert_eq!(system_status.name, Some("system.status".to_string()));
     assert_eq!(system_status.summary, Some("System status".to_string()));
 }
+
+// Regression test for issue #4: ToAsyncApiMessage panics on enums with serde_json::Value fields
+#[test]
+fn test_enum_with_json_value_fields() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum MsgWithValue {
+        #[serde(rename = "hello")]
+        Hello { version: String },
+        #[serde(rename = "result")]
+        Result {
+            ok: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            payload: Option<serde_json::Value>,
+        },
+    }
+
+    // Should not panic
+    let messages = MsgWithValue::asyncapi_messages();
+    assert_eq!(messages.len(), 2);
+
+    let hello = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("hello"))
+        .expect("hello message should exist");
+    assert!(hello.payload.is_some());
+
+    let result = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("result"))
+        .expect("result message should exist");
+    assert!(result.payload.is_some());
+}
