@@ -540,38 +540,25 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     } else {
                         quote! { None }
                     };
-
-                    // Build schema from schema_type and format
-                    let schema = if let Some(schema_type) = &param.schema_type {
-                        let format_field = if let Some(fmt) = &param.format {
-                            quote! {
-                                additional.insert("format".to_string(), serde_json::json!(#fmt));
-                            }
-                        } else {
-                            quote! {}
-                        };
-
-                        quote! {
-                            {
-                                let mut additional = std::collections::HashMap::new();
-                                #format_field
-                                Some(asyncapi_rust::Schema::Object(Box::new(asyncapi_rust::SchemaObject {
-                                    schema_type: Some(serde_json::json!(#schema_type)),
-                                    properties: None,
-                                    required: None,
-                                    description: None,
-                                    title: None,
-                                    enum_values: None,
-                                    const_value: None,
-                                    items: None,
-                                    additional_properties: None,
-                                    one_of: None,
-                                    any_of: None,
-                                    all_of: None,
-                                    additional,
-                                })))
-                            }
-                        }
+                    let param_default = if let Some(d) = &param.default {
+                        quote! { Some(#d.to_string()) }
+                    } else {
+                        quote! { None }
+                    };
+                    let param_enum = if param.enum_values.is_empty() {
+                        quote! { None }
+                    } else {
+                        let vals = &param.enum_values;
+                        quote! { Some(vec![#(#vals.to_string()),*]) }
+                    };
+                    let param_examples = if param.examples.is_empty() {
+                        quote! { None }
+                    } else {
+                        let vals = &param.examples;
+                        quote! { Some(vec![#(#vals.to_string()),*]) }
+                    };
+                    let param_location = if let Some(l) = &param.location {
+                        quote! { Some(#l.to_string()) }
                     } else {
                         quote! { None }
                     };
@@ -581,7 +568,10 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                             #param_name.to_string(),
                             asyncapi_rust::Parameter {
                                 description: #param_desc,
-                                schema: #schema,
+                                default: #param_default,
+                                enum_values: #param_enum,
+                                examples: #param_examples,
+                                location: #param_location,
                             }
                         );
                     }

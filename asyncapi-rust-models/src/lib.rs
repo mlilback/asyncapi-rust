@@ -239,27 +239,16 @@ pub struct ServerVariable {
 /// # Example
 ///
 /// ```rust
-/// use asyncapi_rust_models::{Channel, Parameter, Schema, SchemaObject};
+/// use asyncapi_rust_models::{Channel, Parameter};
 /// use std::collections::HashMap;
 ///
 /// let mut parameters = HashMap::new();
 /// parameters.insert("userId".to_string(), Parameter {
 ///     description: Some("User ID for this WebSocket connection".to_string()),
-///     schema: Some(Schema::Object(Box::new(SchemaObject {
-///         schema_type: Some(serde_json::json!("integer")),
-///         properties: None,
-///         required: None,
-///         description: None,
-///         title: None,
-///         enum_values: None,
-///         const_value: None,
-///         items: None,
-///         additional_properties: None,
-///         one_of: None,
-///         any_of: None,
-///         all_of: None,
-///         additional: HashMap::new(),
-///     }))),
+///     default: None,
+///     enum_values: None,
+///     examples: Some(vec!["42".to_string(), "100".to_string()]),
+///     location: None,
 /// });
 ///
 /// let channel = Channel {
@@ -294,47 +283,48 @@ pub struct Channel {
 
 /// Channel parameter definition
 ///
-/// Defines a parameter that can be used in the channel address. Parameters are
-/// substituted at runtime with actual values and have associated schema definitions.
+/// Defines a parameter that can be used in the channel address, following the
+/// [AsyncAPI 3.0 Parameter Object](https://www.asyncapi.com/docs/reference/specification/v3.0.0#parameterObject).
+///
+/// Note: AsyncAPI 3.0 removed the `schema` property from Parameter (present in 2.x).
+/// Parameters now use `description`, `default`, `enum`, `examples`, and `location`.
 ///
 /// # Example
 ///
 /// ```rust
-/// use asyncapi_rust_models::{Parameter, Schema, SchemaObject};
-/// use std::collections::HashMap;
+/// use asyncapi_rust_models::Parameter;
 ///
 /// let user_id_param = Parameter {
 ///     description: Some("User ID for this WebSocket connection".to_string()),
-///     schema: Some(Schema::Object(Box::new(SchemaObject {
-///         schema_type: Some(serde_json::json!("integer")),
-///         properties: None,
-///         required: None,
-///         description: None,
-///         title: None,
-///         enum_values: None,
-///         const_value: None,
-///         items: None,
-///         additional_properties: None,
-///         one_of: None,
-///         any_of: None,
-///         all_of: None,
-///         additional: HashMap::new(),
-///     }))),
+///     default: Some("0".to_string()),
+///     enum_values: None,
+///     examples: Some(vec!["42".to_string(), "100".to_string()]),
+///     location: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Parameter {
-    /// Parameter description
-    ///
     /// Human-readable description of what this parameter represents
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Parameter schema
-    ///
-    /// The JSON Schema definition for this parameter's type and validation rules
+    /// Default value for this parameter
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub schema: Option<Schema>,
+    pub default: Option<String>,
+
+    /// Enumeration of allowed values for this parameter
+    #[serde(rename = "enum", skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
+
+    /// Example values for this parameter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub examples: Option<Vec<String>>,
+
+    /// Runtime expression specifying the location of the parameter value
+    ///
+    /// See <https://www.asyncapi.com/docs/reference/specification/v3.0.0#runtimeExpression>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
 }
 
 /// Reference to a message definition

@@ -107,13 +107,13 @@ pub enum UserMessage {
     parameter(
         name = "version",
         description = "API version number",
-        schema_type = "string"
+        enum_values = ["v1", "v2"],
+        default = "v2"
     ),
     parameter(
         name = "userId",
         description = "Unique identifier for the authenticated user",
-        schema_type = "integer",
-        format = "int64"
+        examples = ["42", "100"]
     )
 )]
 #[asyncapi_operation(
@@ -185,8 +185,14 @@ fn main() {
                     }
                     println!();
 
-                    if let Some(schema) = &param.schema {
-                        println!("        Schema: {:?}", schema);
+                    if let Some(examples) = &param.examples {
+                        println!("        Examples: {}", examples.join(", "));
+                    }
+                    if let Some(default) = &param.default {
+                        println!("        Default: {}", default);
+                    }
+                    if let Some(enum_values) = &param.enum_values {
+                        println!("        Allowed values: {}", enum_values.join(", "));
                     }
                 }
             }
