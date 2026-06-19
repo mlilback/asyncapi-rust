@@ -311,102 +311,162 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        impl #name {
-            /// Get AsyncAPI message names for this type
-            pub fn asyncapi_message_names() -> Vec<&'static str> {
-                vec![#(#message_literals),*]
-            }
-
-            /// Get the number of messages in this type
-            pub fn asyncapi_message_count() -> usize {
-                #message_count
-            }
-
-            /// Get the serde tag field name if this is a tagged enum
-            pub fn asyncapi_tag_field() -> Option<&'static str> {
-                #tag_info
-            }
-
-            /// Generate AsyncAPI Message objects with JSON schemas
-            ///
-            /// This method requires that the type implements `schemars::JsonSchema`.
-            pub fn asyncapi_messages() -> Vec<asyncapi_rust::Message>
-            where
-                Self: schemars::JsonSchema,
-            {
-                use schemars::schema_for;
-
-                let schema = schema_for!(Self);
-                let schema_json = serde_json::to_value(&schema)
-                    .expect("Failed to serialize schema");
-
-                // Extract shared $defs so each per-variant schema can be self-contained.
-                let root_defs = schema_json.get("$defs").cloned();
-
-                // Build a discriminant→schema map using the actual serde tag field name.
-                // This gives each message its own variant schema instead of the whole-enum
-                // oneOf, and embeds $defs so cross-variant $refs resolve correctly.
-                let tag_field = Self::asyncapi_tag_field();
-                let mut variant_schemas: std::collections::HashMap<String, serde_json::Value> =
-                    std::collections::HashMap::new();
-                if let Some(tag) = tag_field {
-                    if let Some(variants) = schema_json.get("oneOf").and_then(|v| v.as_array()) {
-                        for variant in variants {
-                            let discriminant = variant
-                                .get("properties")
-                                .and_then(|props| props.get(tag))
-                                .and_then(|tag_prop| {
-                                    tag_prop.get("const").or_else(|| {
-                                        tag_prop
-                                            .get("enum")
-                                            .and_then(|e| e.as_array())
-                                            .and_then(|a| a.first())
-                                    })
-                                })
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-
-                            if let Some(name) = discriminant {
-                                let mut variant_schema = variant.clone();
-                                if let (Some(obj), Some(defs)) =
-                                    (variant_schema.as_object_mut(), &root_defs)
-                                {
-                                    obj.insert("$defs".to_string(), defs.clone());
+        // const _: () scopes the helper so it doesn't leak into the user's namespace
+        const _: () = {
+            /// Rewrites schemars' `#/$defs/X` refs to `#/components/schemas/X` in-place.
+            fn rewrite_defs_refs(value: &mut serde_json::Value) {
+                match value {
+                    serde_json::Value::Object(map) => {
+                        if let Some(r) = map.get_mut("$ref") {
+                            if let Some(s) = r.as_str() {
+                                if let Some(name) = s.strip_prefix("#/$defs/") {
+                                    *r = serde_json::Value::String(
+                                        format!("#/components/schemas/{}", name)
+                                    );
                                 }
-                                variant_schemas.insert(name, variant_schema);
+                            }
+                        }
+                        for v in map.values_mut() {
+                            rewrite_defs_refs(v);
+                        }
+                    }
+                    serde_json::Value::Array(arr) => {
+                        for v in arr.iter_mut() {
+                            rewrite_defs_refs(v);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            impl #name {
+                /// Get AsyncAPI message names for this type
+                pub fn asyncapi_message_names() -> Vec<&'static str> {
+                    vec![#(#message_literals),*]
+                }
+
+                /// Get the number of messages in this type
+                pub fn asyncapi_message_count() -> usize {
+                    #message_count
+                }
+
+                /// Get the serde tag field name if this is a tagged enum
+                pub fn asyncapi_tag_field() -> Option<&'static str> {
+                    #tag_info
+                }
+
+                /// Return shared schema definitions for this type, keyed by name.
+                ///
+                /// These are the `$defs` that schemars generates for sub-types referenced
+                /// by this type's variants. The `AsyncApi` derive collects them into
+                /// `components.schemas` so message payloads can reference them via
+                /// `#/components/schemas/X` instead of embedding them inline.
+                pub fn asyncapi_schemas() -> std::collections::HashMap<String, asyncapi_rust::Schema>
+                where
+                    Self: schemars::JsonSchema,
+                {
+                    use schemars::schema_for;
+                    let schema = schema_for!(Self);
+                    let schema_json = serde_json::to_value(&schema)
+                        .expect("Failed to serialize schema");
+
+                    let mut result = std::collections::HashMap::new();
+                    if let Some(defs) = schema_json.get("$defs").and_then(|v| v.as_object()) {
+                        for (name, def_schema) in defs {
+                            let mut def = def_schema.clone();
+                            rewrite_defs_refs(&mut def);
+                            if let Ok(s) = serde_json::from_value::<asyncapi_rust::Schema>(def) {
+                                result.insert(name.clone(), s);
                             }
                         }
                     }
+                    result
                 }
 
-                // Metadata arrays are baked in at compile time; schemas are resolved at runtime.
-                let names: &[&str] = &[#(#message_names_for_gen),*];
-                let titles: &[Option<String>] = &[#(#message_titles),*];
-                let summaries: &[Option<String>] = &[#(#message_summaries),*];
-                let descriptions: &[Option<String>] = &[#(#message_descriptions),*];
-                let content_types: &[Option<String>] = &[#(#message_content_types),*];
+                /// Generate AsyncAPI Message objects with JSON schemas.
+                ///
+                /// For internally-tagged enums each message carries only its own variant
+                /// schema. `$ref`s within payloads point to `#/components/schemas/X`;
+                /// the corresponding definitions are available via `asyncapi_schemas()`.
+                pub fn asyncapi_messages() -> Vec<asyncapi_rust::Message>
+                where
+                    Self: schemars::JsonSchema,
+                {
+                    use schemars::schema_for;
 
-                let mut messages = Vec::with_capacity(names.len());
-                for i in 0..names.len() {
-                    let msg_name = names[i];
-                    let payload = if let Some(v) = variant_schemas.get(msg_name) {
-                        serde_json::from_value(v.clone()).ok()
-                    } else {
-                        // Structs, untagged enums, or any variant not found in the map
-                        serde_json::from_value(schema_json.clone()).ok()
-                    };
-                    messages.push(asyncapi_rust::Message {
-                        name: Some(msg_name.to_string()),
-                        title: titles[i].clone(),
-                        summary: summaries[i].clone(),
-                        description: descriptions[i].clone(),
-                        content_type: content_types[i].clone(),
-                        payload,
-                    });
+                    let schema = schema_for!(Self);
+                    let schema_json = serde_json::to_value(&schema)
+                        .expect("Failed to serialize schema");
+
+                    // Build a discriminant→schema map using the actual serde tag field name.
+                    let tag_field = Self::asyncapi_tag_field();
+                    let mut variant_schemas: std::collections::HashMap<String, serde_json::Value> =
+                        std::collections::HashMap::new();
+                    if let Some(tag) = tag_field {
+                        if let Some(variants) = schema_json.get("oneOf").and_then(|v| v.as_array()) {
+                            for variant in variants {
+                                let discriminant = variant
+                                    .get("properties")
+                                    .and_then(|props| props.get(tag))
+                                    .and_then(|tag_prop| {
+                                        tag_prop.get("const").or_else(|| {
+                                            tag_prop
+                                                .get("enum")
+                                                .and_then(|e| e.as_array())
+                                                .and_then(|a| a.first())
+                                        })
+                                    })
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+
+                                if let Some(name) = discriminant {
+                                    let mut variant_schema = variant.clone();
+                                    // Drop $defs — they live in components.schemas, not the payload.
+                                    if let Some(obj) = variant_schema.as_object_mut() {
+                                        obj.remove("$defs");
+                                    }
+                                    rewrite_defs_refs(&mut variant_schema);
+                                    variant_schemas.insert(name, variant_schema);
+                                }
+                            }
+                        }
+                    }
+
+                    // Metadata arrays are baked in at compile time; schemas resolved at runtime.
+                    let names: &[&str] = &[#(#message_names_for_gen),*];
+                    let titles: &[Option<String>] = &[#(#message_titles),*];
+                    let summaries: &[Option<String>] = &[#(#message_summaries),*];
+                    let descriptions: &[Option<String>] = &[#(#message_descriptions),*];
+                    let content_types: &[Option<String>] = &[#(#message_content_types),*];
+
+                    let mut messages = Vec::with_capacity(names.len());
+                    for i in 0..names.len() {
+                        let msg_name = names[i];
+                        let payload = if let Some(v) = variant_schemas.get(msg_name) {
+                            serde_json::from_value(v.clone()).ok()
+                        } else {
+                            // Structs, untagged enums, or variants not in the map:
+                            // remove $defs and rewrite refs in the full schema.
+                            let mut fallback = schema_json.clone();
+                            if let Some(obj) = fallback.as_object_mut() {
+                                obj.remove("$defs");
+                            }
+                            rewrite_defs_refs(&mut fallback);
+                            serde_json::from_value(fallback).ok()
+                        };
+                        messages.push(asyncapi_rust::Message {
+                            name: Some(msg_name.to_string()),
+                            title: titles[i].clone(),
+                            summary: summaries[i].clone(),
+                            description: descriptions[i].clone(),
+                            content_type: content_types[i].clone(),
+                            payload,
+                        });
+                    }
+                    messages
                 }
-                messages
             }
-        }
+        };
     };
 
     TokenStream::from(expanded)
@@ -703,17 +763,20 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
         }
     };
 
-    // Generate components with messages
+    // Generate components with messages and hoisted shared schemas
     let components_code = if spec_meta.message_types.is_empty() {
         quote! { None }
     } else {
-        let message_calls = spec_meta.message_types.iter().map(|type_name| {
+        let type_calls = spec_meta.message_types.iter().map(|type_name| {
             quote! {
-                // Call asyncapi_messages() for this type and add to messages map
                 for msg in #type_name::asyncapi_messages() {
                     if let Some(ref name) = msg.name {
                         messages.insert(name.clone(), msg.clone());
                     }
+                }
+                // Hoist shared $defs into components.schemas (first writer wins on name collision)
+                for (name, schema) in #type_name::asyncapi_schemas() {
+                    schemas.entry(name).or_insert(schema);
                 }
             }
         });
@@ -721,10 +784,11 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
         quote! {
             {
                 let mut messages = std::collections::HashMap::new();
-                #(#message_calls)*
+                let mut schemas = std::collections::HashMap::new();
+                #(#type_calls)*
                 Some(asyncapi_rust::Components {
                     messages: if messages.is_empty() { None } else { Some(messages) },
-                    schemas: None,
+                    schemas: if schemas.is_empty() { None } else { Some(schemas) },
                 })
             }
         }

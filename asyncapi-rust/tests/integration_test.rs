@@ -470,3 +470,115 @@ fn test_enum_with_json_value_fields() {
         .expect("result message should exist");
     assert!(result.payload.is_some());
 }
+
+// Regression for #7: shared $defs hoisted to components.schemas; payloads have no $defs block
+// and $refs point to #/components/schemas/X instead of #/$defs/X.
+#[test]
+fn test_shared_defs_hoisted_to_components_schemas() {
+    // SharedInfo will appear in schemars' $defs because it's used by multiple variants
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    pub struct SharedInfo {
+        pub id: i64,
+        pub label: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum EventMsg {
+        #[serde(rename = "event-a")]
+        EventA { info: SharedInfo },
+        #[serde(rename = "event-b")]
+        EventB { info: SharedInfo, extra: String },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Hoisting Test", version = "1.0.0")]
+    #[asyncapi_messages(EventMsg)]
+    struct HoistApi;
+
+    // asyncapi_schemas() must expose the shared type
+    let schemas = EventMsg::asyncapi_schemas();
+    assert!(
+        schemas.contains_key("SharedInfo"),
+        "SharedInfo must appear in asyncapi_schemas()"
+    );
+
+    // No message payload may contain a $defs block
+    let messages = EventMsg::asyncapi_messages();
+    for msg in &messages {
+        let payload_json = serde_json::to_value(&msg.payload).unwrap();
+        assert!(
+            payload_json.get("$defs").is_none(),
+            "payload for '{}' must not contain $defs",
+            msg.name.as_deref().unwrap_or("?")
+        );
+    }
+
+    // Any $ref in a payload must point to #/components/schemas/, not #/$defs/
+    fn find_bad_refs(v: &serde_json::Value) -> Vec<String> {
+        let mut bad = Vec::new();
+        match v {
+            serde_json::Value::Object(map) => {
+                if let Some(r) = map.get("$ref").and_then(|r| r.as_str()) {
+                    if r.starts_with("#/$defs/") {
+                        bad.push(r.to_string());
+                    }
+                }
+                for val in map.values() {
+                    bad.extend(find_bad_refs(val));
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for val in arr {
+                    bad.extend(find_bad_refs(val));
+                }
+            }
+            _ => {}
+        }
+        bad
+    }
+
+    for msg in &messages {
+        let payload_json = serde_json::to_value(&msg.payload).unwrap();
+        let bad = find_bad_refs(&payload_json);
+        assert!(
+            bad.is_empty(),
+            "payload for '{}' still has #/$defs/ refs: {:?}",
+            msg.name.as_deref().unwrap_or("?"),
+            bad
+        );
+    }
+
+    // The full spec must have components.schemas populated with SharedInfo
+    let spec = HoistApi::asyncapi_spec();
+    let comp_schemas = spec
+        .components
+        .as_ref()
+        .and_then(|c| c.schemas.as_ref())
+        .expect("components.schemas must be populated");
+
+    assert!(
+        comp_schemas.contains_key("SharedInfo"),
+        "components.schemas must contain SharedInfo"
+    );
+
+    // And each message payload in components.messages must also be clean
+    let comp_messages = spec
+        .components
+        .as_ref()
+        .and_then(|c| c.messages.as_ref())
+        .expect("components.messages must be populated");
+
+    for (name, msg) in comp_messages {
+        let payload_json = serde_json::to_value(&msg.payload).unwrap();
+        assert!(
+            payload_json.get("$defs").is_none(),
+            "components.messages.{name}.payload must not contain $defs"
+        );
+        let bad = find_bad_refs(&payload_json);
+        assert!(
+            bad.is_empty(),
+            "components.messages.{name}.payload has unrewritten refs: {bad:?}"
+        );
+    }
+}
