@@ -50,8 +50,10 @@ pub struct ChannelMeta {
 pub struct ParameterMeta {
     pub name: String,
     pub description: Option<String>,
-    pub schema_type: Option<String>,
-    pub format: Option<String>,
+    pub default: Option<String>,
+    pub enum_values: Vec<String>,
+    pub examples: Vec<String>,
+    pub location: Option<String>,
 }
 
 /// Operation metadata
@@ -265,8 +267,10 @@ fn extract_channel(attr: &Attribute) -> Option<ChannelMeta> {
 fn extract_channel_parameter(nested: &syn::meta::ParseNestedMeta) -> Option<ParameterMeta> {
     let mut name = None;
     let mut description = None;
-    let mut schema_type = None;
-    let mut format = None;
+    let mut default = None;
+    let mut enum_values = Vec::new();
+    let mut examples = Vec::new();
+    let mut location = None;
 
     let _ = nested.parse_nested_meta(|inner| {
         if inner.path.is_ident("name") {
@@ -277,14 +281,28 @@ fn extract_channel_parameter(nested: &syn::meta::ParseNestedMeta) -> Option<Para
             let value = inner.value()?;
             let s: syn::LitStr = value.parse()?;
             description = Some(s.value());
-        } else if inner.path.is_ident("schema_type") {
+        } else if inner.path.is_ident("default") {
             let value = inner.value()?;
             let s: syn::LitStr = value.parse()?;
-            schema_type = Some(s.value());
-        } else if inner.path.is_ident("format") {
+            default = Some(s.value());
+        } else if inner.path.is_ident("enum_values") {
+            let _ = inner.value()?;
+            let content;
+            syn::bracketed!(content in inner.input);
+            let values: syn::punctuated::Punctuated<syn::LitStr, syn::Token![,]> =
+                content.parse_terminated(|stream| stream.parse(), syn::Token![,])?;
+            enum_values = values.iter().map(|lit| lit.value()).collect();
+        } else if inner.path.is_ident("examples") {
+            let _ = inner.value()?;
+            let content;
+            syn::bracketed!(content in inner.input);
+            let values: syn::punctuated::Punctuated<syn::LitStr, syn::Token![,]> =
+                content.parse_terminated(|stream| stream.parse(), syn::Token![,])?;
+            examples = values.iter().map(|lit| lit.value()).collect();
+        } else if inner.path.is_ident("location") {
             let value = inner.value()?;
             let s: syn::LitStr = value.parse()?;
-            format = Some(s.value());
+            location = Some(s.value());
         }
         Ok(())
     });
@@ -292,8 +310,10 @@ fn extract_channel_parameter(nested: &syn::meta::ParseNestedMeta) -> Option<Para
     Some(ParameterMeta {
         name: name?,
         description,
-        schema_type,
-        format,
+        default,
+        enum_values,
+        examples,
+        location,
     })
 }
 
@@ -559,7 +579,7 @@ mod tests {
             #[asyncapi_channel(
                 name = "rtMessaging",
                 address = "/api/ws/{userId}",
-                parameter(name = "userId", description = "User ID for this WebSocket connection", schema_type = "integer", format = "int64")
+                parameter(name = "userId", description = "User ID for this WebSocket connection", examples = ["42", "100"])
             )]
         }];
 
@@ -576,8 +596,7 @@ mod tests {
             param.description,
             Some("User ID for this WebSocket connection".to_string())
         );
-        assert_eq!(param.schema_type, Some("integer".to_string()));
-        assert_eq!(param.format, Some("int64".to_string()));
+        assert_eq!(param.examples, vec!["42".to_string(), "100".to_string()]);
     }
 
     #[test]
@@ -586,8 +605,8 @@ mod tests {
             #[asyncapi_channel(
                 name = "userChannel",
                 address = "/api/{version}/ws/{userId}",
-                parameter(name = "version", description = "API version", schema_type = "string"),
-                parameter(name = "userId", description = "User ID", schema_type = "integer", format = "int64")
+                parameter(name = "version", description = "API version", enum_values = ["v1", "v2"], default = "v2"),
+                parameter(name = "userId", description = "User ID", examples = ["42"])
             )]
         }];
 
@@ -598,12 +617,49 @@ mod tests {
 
         let param0 = &channel.parameters[0];
         assert_eq!(param0.name, "version");
-        assert_eq!(param0.schema_type, Some("string".to_string()));
-        assert_eq!(param0.format, None);
+        assert_eq!(param0.enum_values, vec!["v1".to_string(), "v2".to_string()]);
+        assert_eq!(param0.default, Some("v2".to_string()));
 
         let param1 = &channel.parameters[1];
         assert_eq!(param1.name, "userId");
-        assert_eq!(param1.schema_type, Some("integer".to_string()));
-        assert_eq!(param1.format, Some("int64".to_string()));
+        assert_eq!(param1.examples, vec!["42".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_channel_with_description() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_channel(
+                name = "events",
+                address = "/ws/events",
+                description = "Real-time event stream"
+            )]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.channels.len(), 1);
+        let channel = &meta.channels[0];
+        assert_eq!(channel.name, "events");
+        assert_eq!(
+            channel.description,
+            Some("Real-time event stream".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_operation_with_description() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "sendMessage",
+                action = "send",
+                channel = "chat",
+                description = "Send a chat message"
+            )]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.operations.len(), 1);
+        let op = &meta.operations[0];
+        assert_eq!(op.name, "sendMessage");
+        assert_eq!(op.description, Some("Send a chat message".to_string()));
     }
 }

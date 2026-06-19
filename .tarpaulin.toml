@@ -1,0 +1,7 @@
+[default]
+# asyncapi-rust-codegen/src/lib.rs contains proc macro entry points that
+# execute at compile time, not test runtime — tarpaulin cannot instrument them.
+# The attribute-parsing modules (asyncapi_attrs, asyncapi_spec_attrs,
+# serde_attrs) run normally at test time and are measured separately.
+exclude-files = ["asyncapi-rust-codegen/src/lib.rs"]
+workspace = true

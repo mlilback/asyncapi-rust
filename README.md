@@ -2,11 +2,34 @@
 
 [![Crates.io](https://img.shields.io/crates/v/asyncapi-rust.svg)](https://crates.io/crates/asyncapi-rust)
 [![Documentation](https://docs.rs/asyncapi-rust/badge.svg)](https://docs.rs/asyncapi-rust)
+[![codecov](https://codecov.io/gh/mlilback/asyncapi-rust/graph/badge.svg)](https://codecov.io/gh/mlilback/asyncapi-rust)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](https://opensource.org/licenses/MIT)
 
 **AsyncAPI 3.0 specification generation for Rust WebSockets and async protocols**
 
 Generate AsyncAPI documentation directly from your Rust code using procedural macros. Similar to how `utoipa` generates OpenAPI specs for REST APIs, `asyncapi-rust` generates AsyncAPI specs for WebSocket and other async protocols.
+
+## Table of Contents
+
+- [Features](#features)
+- [Migrating from 0.2.x](#migrating-from-02x)
+- [Quick Start](#quick-start)
+  - [Message Integration](#message-integration)
+  - [Server Variables and Channel Parameters](#server-variables-and-channel-parameters)
+  - [Message Naming and Disambiguation](#message-naming-and-disambiguation)
+- [Examples](#examples)
+- [Motivation](#motivation)
+- [Comparison: Manual vs Generated](#comparison-manual-vs-generated)
+- [Supported Frameworks](#supported-frameworks)
+- [Binary Protocol Support](#binary-protocol-support)
+- [DateTime Support (Chrono)](#datetime-support-chrono)
+- [Generating Specification Files](#generating-specification-files)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Statement on AI/LLM Usage](#statement-on-aillm-usage)
+- [Acknowledgments](#acknowledgments)
 
 ## Features
 
@@ -17,13 +40,31 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 - 🌐 **Framework agnostic**: Works with actix-ws, axum, or any serde-compatible types
 - 📦 **Binary protocols**: Support for mixed text/binary WebSocket messages (Arrow IPC, Protobuf, etc.)
 
+## Migrating from 0.2.x
+
+**Breaking change in 0.3.0:** message names in `components.messages` and `asyncapi_message_names()` now derive from the **Rust variant identifier**, not the serde rename string.
+
+| Before (0.2.x) | After (0.3.0) |
+|----------------|---------------|
+| `messages.get("user.join")` | `messages.get("UserJoin")` |
+| `asyncapi_message_names()` → `["user.join", …]` | `asyncapi_message_names()` → `["UserJoin", …]` |
+
+The serde rename string remains the wire discriminant inside the payload schema — wire format is unchanged.
+
+Other 0.3.0 additions:
+- `#[asyncapi(message_name = "CustomName")]` per-variant override for disambiguation
+- Runtime collision detection: two enums sharing a variant identifier in the same document panic with a clear error instead of silently overwriting
+- `Schema::Any` handles `serde_json::Value` fields without panicking
+- AsyncAPI 3.0–compliant `Parameter` object (removed `schema`, added `default`, `enum_values`, `examples`, `location`)
+- Shared `$defs` are hoisted to `components.schemas`; message payloads reference them via `$ref: "#/components/schemas/X"`
+
 ## Quick Start
 
 Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-asyncapi-rust = "0.2"
+asyncapi-rust = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 schemars = { version = "1.1", features = ["derive"] }
 
@@ -52,9 +93,9 @@ pub enum ChatMessage {
 }
 
 fn main() {
-    // Get message names
+    // Get message names — returns Rust variant identifiers, not serde rename strings
     let names = ChatMessage::asyncapi_message_names();
-    println!("Messages: {:?}", names); // ["user.join", "chat.message"]
+    println!("Messages: {:?}", names); // ["UserJoin", "Chat"]
 
     // Generate messages with JSON schemas
     let messages = ChatMessage::asyncapi_messages();
@@ -132,8 +173,7 @@ use asyncapi_rust::AsyncApi;
     parameter(
         name = "userId",
         description = "User ID for this WebSocket connection",
-        schema_type = "integer",
-        format = "int64"
+        examples = ["42", "100"]
     )
 )]
 struct UserApi;
@@ -146,35 +186,65 @@ struct UserApi;
 - `default`: Default value if not provided
 - `enum_values`: Restricted set of allowed values
 
-**Channel parameters** define typed path parameters with:
+**Channel parameters** define path parameters with:
 - `name`: Parameter name (required)
 - `description`: Human-readable description
-- `schema_type`: JSON Schema type (e.g., "integer", "string")
-- `format`: JSON Schema format (e.g., "int64", "uuid")
+- `default`: Default value if not provided
+- `enum_values`: Restricted set of allowed values (e.g., `["v1", "v2"]`)
+- `examples`: Example values for documentation (e.g., `["42", "100"]`)
+- `location`: Runtime expression for the parameter's location
+
+### Message Naming and Disambiguation
+
+By default, message names in `components.messages` and `asyncapi_message_names()` are the **Rust variant identifiers** (`UserJoin`, `Chat`), not the serde rename strings (`"user.join"`, `"chat.message"`). The serde rename is preserved as the wire discriminant inside the payload schema.
+
+If two `ToAsyncApiMessage` enums in the same AsyncAPI document share a variant identifier, the runtime detects the collision and panics with a clear message. Use `#[asyncapi(message_name = "…")]` to disambiguate:
+
+```rust
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+#[serde(tag = "message")]
+pub enum Operation {
+    #[serde(rename = "get-info")]
+    GetInfo { project_id: i64 },
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+#[serde(tag = "message")]
+pub enum OperationResponse {
+    // Same wire discriminant as Operation::GetInfo, but a distinct message name
+    #[serde(rename = "get-info")]
+    #[asyncapi(message_name = "GetInfoResponse")]
+    GetInfo { id: i64, label: String },
+}
+```
+
+Both messages appear in `components.messages` under distinct keys (`GetInfo` and `GetInfoResponse`), with `"get-info"` as the wire value in both payload schemas.
+
+`#[asyncapi(message_name = "…")]` attributes:
+- `message_name = "CustomName"`: Override the default (variant ident) for a single variant
+- An empty serde rename (`#[serde(rename = "")]`) automatically falls back to the variant identifier — no override needed
 
 ## Examples
 
 See working examples in the `examples/` directory:
 
 - **`simple.rs`** - Basic message types with schema generation
-  ```bash
-  cargo run --example simple
-  ```
-
 - **`chat_api.rs`** - Complete AsyncAPI 3.0 specification with server, channels, and operations
-  ```bash
-  cargo run --example chat_api
-  ```
-
-- **`message_integration.rs`** - Demonstrates automatic message integration with `#[asyncapi_messages(...)]`
-  ```bash
-  cargo run --example message_integration
-  ```
-
+- **`message_integration.rs`** - Automatic message integration with `#[asyncapi_messages(...)]`
 - **`server_variables.rs`** - Server variables and channel parameters for dynamic paths
-  ```bash
-  cargo run --example server_variables
-  ```
+- **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
+- **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
+- **`generate_spec_file.rs`** - Generating specification files
+- **`actix_websocket.rs`** - Real-world actix-web + actix-ws integration
+- **`axum_websocket.rs`** - Real-world axum WebSocket integration
+- **`framework_integration_guide.rs`** - Comprehensive framework integration guide
+
+Run any example:
+```bash
+cargo run --example simple
+cargo run --example message_integration
+cargo run --example server_variables
+```
 
 ## Motivation
 
@@ -229,10 +299,9 @@ Document binary WebSocket messages (Arrow IPC, Protobuf, MessagePack):
 /// Binary data stream
 #[derive(ToAsyncApiMessage)]
 #[asyncapi(
-    name = "BinaryData",
     content_type = "application/octet-stream",
-    binary = true,
-    description = "Binary data payload",
+    triggers_binary,
+    description = "Raw binary data payload",
 )]
 pub struct BinaryData;
 ```
@@ -261,7 +330,7 @@ pub enum TimestampedMessage {
 **Cargo.toml configuration:**
 ```toml
 [dependencies]
-asyncapi-rust = "0.2"
+asyncapi-rust = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 schemars = { version = "1.1", features = ["derive", "chrono04"] }
 ```
@@ -329,27 +398,6 @@ cargo asyncapi generate
 cargo asyncapi serve  # Start AsyncAPI UI viewer
 ```
 
-## Examples
-
-The `examples/` directory contains working demonstrations:
-
-- **`simple.rs`** - Basic message types with schema generation
-- **`chat_api.rs`** - Complete AsyncAPI 3.0 specification
-- **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
-- **`generate_spec_file.rs`** - Generating specification files
-- **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
-- **`message_integration.rs`** - Automatic message integration with `#[asyncapi_messages(...)]`
-- **`actix_websocket.rs`** - Real-world actix-web + actix-ws integration
-- **`axum_websocket.rs`** - Real-world axum WebSocket integration
-- **`framework_integration_guide.rs`** - Comprehensive framework integration guide
-
-Run any example:
-```bash
-cargo run --example message_integration
-cargo run --example actix_websocket
-cargo run --example axum_websocket
-```
-
 ## Documentation
 
 - [API Documentation](https://docs.rs/asyncapi-rust)
@@ -366,6 +414,7 @@ cargo run --example axum_websocket
 - [ ] Embedded AsyncAPI UI
 - [ ] Additional framework support (tonic/gRPC, Rocket, Warp)
 - [ ] Cargo plugin (`cargo-asyncapi`) for automated spec generation
+- [x] ~98% test coverage (measured by cargo-tarpaulin)
 
 ## Contributing
 
@@ -383,6 +432,10 @@ at your option.
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+## Statement on AI/LLM Usage
+
+There has been a lot of discussion in the Rust community about usage of AI and LLMs. This project has been implemented with the assistance of Claude Code, but it is *not* vibe-coded. In a few years, using AI Tools will be common practice and these arguments will seem as quaint as those made decades ago against the use of IDEs. A human has designed this project and reviewed all code.
 
 ## Acknowledgments
 
