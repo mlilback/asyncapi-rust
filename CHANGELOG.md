@@ -1,4 +1,26 @@
+## [0.4.0] - 2026-06-19
+
+### 🐛 Bug Fixes
+
+
+- Replace HashMap with IndexMap for deterministic spec output (closes #9) ([#9](https://github.com/mlilback/asyncapi-rust/issues/9))
+
+
+### 📚 Documentation
+
+
+- Add 0.3.x → 0.4.0 migration guide and update version references
+
+
+
+
 ## [0.3.0] - 2026-06-19
+
+### ⚙️ Miscellaneous
+
+
+- Merge release/0.3.0 into main
+
 
 ### 📚 Documentation
 
@@ -76,11 +98,6 @@
 - Update channel parameter docs to reflect AsyncAPI 3.0 Parameter fields
 
 
-
-
-### New Contributors
-
-* @mlilback made their first contribution
 
 
 ## [0.2.0] - 2025-11-07
