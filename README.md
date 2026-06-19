@@ -17,13 +17,31 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 - 🌐 **Framework agnostic**: Works with actix-ws, axum, or any serde-compatible types
 - 📦 **Binary protocols**: Support for mixed text/binary WebSocket messages (Arrow IPC, Protobuf, etc.)
 
+## Migrating from 0.2.x
+
+**Breaking change in 0.3.0:** message names in `components.messages` and `asyncapi_message_names()` now derive from the **Rust variant identifier**, not the serde rename string.
+
+| Before (0.2.x) | After (0.3.0) |
+|----------------|---------------|
+| `messages.get("user.join")` | `messages.get("UserJoin")` |
+| `asyncapi_message_names()` → `["user.join", …]` | `asyncapi_message_names()` → `["UserJoin", …]` |
+
+The serde rename string remains the wire discriminant inside the payload schema — wire format is unchanged.
+
+Other 0.3.0 additions:
+- `#[asyncapi(message_name = "CustomName")]` per-variant override for disambiguation
+- Runtime collision detection: two enums sharing a variant identifier in the same document panic with a clear error instead of silently overwriting
+- `Schema::Any` handles `serde_json::Value` fields without panicking
+- AsyncAPI 3.0–compliant `Parameter` object (removed `schema`, added `default`, `enum_values`, `examples`, `location`)
+- Shared `$defs` are hoisted to `components.schemas`; message payloads reference them via `$ref: "#/components/schemas/X"`
+
 ## Quick Start
 
 Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-asyncapi-rust = "0.2"
+asyncapi-rust = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 schemars = { version = "1.1", features = ["derive"] }
 
@@ -52,9 +70,9 @@ pub enum ChatMessage {
 }
 
 fn main() {
-    // Get message names
+    // Get message names — returns Rust variant identifiers, not serde rename strings
     let names = ChatMessage::asyncapi_message_names();
-    println!("Messages: {:?}", names); // ["user.join", "chat.message"]
+    println!("Messages: {:?}", names); // ["UserJoin", "Chat"]
 
     // Generate messages with JSON schemas
     let messages = ChatMessage::asyncapi_messages();
@@ -152,6 +170,36 @@ struct UserApi;
 - `enum_values`: Restricted set of allowed values (e.g., `["v1", "v2"]`)
 - `examples`: Example values for documentation (e.g., `["42", "100"]`)
 - `location`: Runtime expression for the parameter's location
+
+### Message Naming and Disambiguation
+
+By default, message names in `components.messages` and `asyncapi_message_names()` are the **Rust variant identifiers** (`UserJoin`, `Chat`), not the serde rename strings (`"user.join"`, `"chat.message"`). The serde rename is preserved as the wire discriminant inside the payload schema.
+
+If two `ToAsyncApiMessage` enums in the same AsyncAPI document share a variant identifier, the runtime detects the collision and panics with a clear message. Use `#[asyncapi(message_name = "…")]` to disambiguate:
+
+```rust
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+#[serde(tag = "message")]
+pub enum Operation {
+    #[serde(rename = "get-info")]
+    GetInfo { project_id: i64 },
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+#[serde(tag = "message")]
+pub enum OperationResponse {
+    // Same wire discriminant as Operation::GetInfo, but a distinct message name
+    #[serde(rename = "get-info")]
+    #[asyncapi(message_name = "GetInfoResponse")]
+    GetInfo { id: i64, label: String },
+}
+```
+
+Both messages appear in `components.messages` under distinct keys (`GetInfo` and `GetInfoResponse`), with `"get-info"` as the wire value in both payload schemas.
+
+`#[asyncapi(message_name = "…")]` attributes:
+- `message_name = "CustomName"`: Override the default (variant ident) for a single variant
+- An empty serde rename (`#[serde(rename = "")]`) automatically falls back to the variant identifier — no override needed
 
 ## Examples
 
@@ -262,7 +310,7 @@ pub enum TimestampedMessage {
 **Cargo.toml configuration:**
 ```toml
 [dependencies]
-asyncapi-rust = "0.2"
+asyncapi-rust = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 schemars = { version = "1.1", features = ["derive", "chrono04"] }
 ```
