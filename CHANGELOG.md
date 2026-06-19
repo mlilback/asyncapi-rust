@@ -1,3 +1,19 @@
+## [0.3.0] - 2026-06-19
+
+### 📚 Documentation
+
+
+- Update README for 0.3.0 and regenerate CHANGELOG
+
+
+### 🧪 Testing
+
+
+- Expand coverage to ~98% and add CI coverage reporting
+
+
+
+
 ## [0.3.0-beta.3] - 2026-06-19
 
 ### 🐛 Bug Fixes

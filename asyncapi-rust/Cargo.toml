@@ -14,8 +14,8 @@ description = "AsyncAPI 3.0 specification generation for Rust WebSockets and asy
 readme = "../README.md"
 
 [dependencies]
-asyncapi-rust-codegen = { version = "0.3.0-beta.3", path = "../asyncapi-rust-codegen" }
-asyncapi-rust-models = { version = "0.3.0-beta.3", path = "../asyncapi-rust-models" }
+asyncapi-rust-codegen = { version = "0.3.0", path = "../asyncapi-rust-codegen" }
+asyncapi-rust-models = { version = "0.3.0", path = "../asyncapi-rust-models" }
 
 # Re-export commonly used dependencies
 serde = { workspace = true }
