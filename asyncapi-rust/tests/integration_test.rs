@@ -724,3 +724,297 @@ fn test_message_name_override_attribute() {
         Some("editor-update")
     );
 }
+
+// ── Roundtrip deserialization ────────────────────────────────────────────────
+
+// A spec with servers, channels, operations, and components must survive
+// serialize → deserialize → re-serialize with all fields intact.
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+#[serde(tag = "type")]
+enum RoundtripMsg {
+    #[serde(rename = "ping")]
+    #[asyncapi(summary = "Ping")]
+    Ping { seq: u32 },
+    #[serde(rename = "pong")]
+    #[asyncapi(summary = "Pong")]
+    Pong { seq: u32, latency_ms: u32 },
+}
+
+#[derive(AsyncApi)]
+#[asyncapi(
+    title = "Roundtrip API",
+    version = "2.0.0",
+    description = "Used for roundtrip tests"
+)]
+#[asyncapi_server(name = "prod", host = "ws.example.com", protocol = "wss")]
+#[asyncapi_channel(name = "ping", address = "/ws/ping")]
+// Two operations share channel = "ping" — clippy::duplicated_attributes is a false positive here
+#[allow(clippy::duplicated_attributes)]
+#[asyncapi_operation(name = "sendPing", action = "send", channel = "ping")]
+#[asyncapi_operation(name = "receivePong", action = "receive", channel = "ping")]
+#[asyncapi_messages(RoundtripMsg)]
+struct RoundtripApi;
+
+#[test]
+fn test_full_spec_roundtrip() {
+    use asyncapi_rust::AsyncApiSpec;
+
+    let original = RoundtripApi::asyncapi_spec();
+
+    // Serialize to JSON
+    let json = serde_json::to_string_pretty(&original).expect("serialization failed");
+
+    // Deserialize back
+    let restored: AsyncApiSpec =
+        serde_json::from_str(&json).expect("deserialization failed — JSON was:\n{json}");
+
+    // Info survives
+    assert_eq!(restored.info.title, "Roundtrip API");
+    assert_eq!(restored.info.version, "2.0.0");
+    assert_eq!(
+        restored.info.description,
+        Some("Used for roundtrip tests".to_string())
+    );
+
+    // Servers survive
+    let servers = restored
+        .servers
+        .as_ref()
+        .expect("servers must survive roundtrip");
+    assert!(servers.contains_key("prod"), "prod server must survive");
+    assert_eq!(servers["prod"].protocol, "wss");
+
+    // Channels survive
+    let channels = restored
+        .channels
+        .as_ref()
+        .expect("channels must survive roundtrip");
+    assert!(channels.contains_key("ping"));
+    assert_eq!(channels["ping"].address, Some("/ws/ping".to_string()));
+
+    // Operations survive with correct action
+    let ops = restored
+        .operations
+        .as_ref()
+        .expect("operations must survive roundtrip");
+    assert_eq!(ops.len(), 2);
+    assert!(matches!(
+        ops["sendPing"].action,
+        asyncapi_rust::OperationAction::Send
+    ));
+    assert!(matches!(
+        ops["receivePong"].action,
+        asyncapi_rust::OperationAction::Receive
+    ));
+
+    // Components.messages survive with payloads intact
+    let msgs = restored
+        .components
+        .as_ref()
+        .and_then(|c| c.messages.as_ref())
+        .expect("components.messages must survive roundtrip");
+    assert!(msgs.contains_key("Ping"), "Ping message must survive");
+    assert!(msgs.contains_key("Pong"), "Pong message must survive");
+    assert!(msgs["Ping"].payload.is_some(), "Ping payload must survive");
+    assert!(msgs["Pong"].payload.is_some(), "Pong payload must survive");
+    assert_eq!(msgs["Ping"].summary.as_deref(), Some("Ping"));
+
+    // Re-serialize the restored spec — must produce valid JSON again
+    let rejson = serde_json::to_string(&restored).expect("re-serialization failed");
+    assert!(rejson.contains("Roundtrip API"));
+    assert!(rejson.contains("wss"));
+}
+
+// ── Schema::Any ──────────────────────────────────────────────────────────────
+
+#[test]
+fn test_schema_any_roundtrip() {
+    use asyncapi_rust::Schema;
+
+    // Boolean JSON Schema values (true/false) are valid per the spec but are
+    // not objects, so they fall through Reference and Object to Schema::Any.
+    let true_schema: Schema =
+        serde_json::from_value(serde_json::json!(true)).expect("true should deserialize");
+    assert!(
+        matches!(true_schema, Schema::Any(_)),
+        "boolean true must deserialize as Schema::Any"
+    );
+
+    let false_schema: Schema =
+        serde_json::from_value(serde_json::json!(false)).expect("false should deserialize");
+    assert!(
+        matches!(false_schema, Schema::Any(_)),
+        "boolean false must deserialize as Schema::Any"
+    );
+
+    // Schema::Any round-trips: serialize back produces the original value
+    let json_val = serde_json::to_value(&true_schema).unwrap();
+    assert_eq!(json_val, serde_json::json!(true));
+
+    // Numeric Schema::Any (also not a valid Object or Reference)
+    let num_schema: Schema =
+        serde_json::from_value(serde_json::json!(42)).expect("number should deserialize");
+    assert!(
+        matches!(num_schema, Schema::Any(_)),
+        "number must deserialize as Schema::Any"
+    );
+
+    // Manually constructed Schema::Any serializes correctly
+    let any = Schema::Any(serde_json::json!({"x-custom": "extension-only schema"}));
+    let serialized = serde_json::to_value(&any).unwrap();
+    assert_eq!(serialized["x-custom"], "extension-only schema");
+}
+
+#[test]
+fn test_schema_any_in_generated_messages() {
+    // Verifies the regression from #4: an enum with serde_json::Value fields
+    // must produce Schema::Any (not panic) for the open-ended payload property.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum MsgWithAny {
+        #[serde(rename = "typed")]
+        Typed { id: u32 },
+        #[serde(rename = "open")]
+        Open {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            data: Option<serde_json::Value>,
+        },
+    }
+
+    let messages = MsgWithAny::asyncapi_messages();
+    assert_eq!(messages.len(), 2);
+
+    let open_msg = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("Open"))
+        .expect("Open message must exist");
+
+    // The payload itself must be present and parseable
+    assert!(open_msg.payload.is_some(), "Open payload must be present");
+
+    // The payload schema's "data" property must be Schema::Any (open-ended)
+    let payload_json = serde_json::to_value(&open_msg.payload).unwrap();
+    let data_schema = payload_json.pointer("/properties/data");
+    assert!(
+        data_schema.is_some(),
+        "data property must appear in payload schema"
+    );
+    // Deserialize the data property's schema — must not panic and must be Schema::Any
+    if let Some(ds) = data_schema {
+        let schema: asyncapi_rust::Schema = serde_json::from_value(ds.clone())
+            .expect("data property schema must deserialize without panic");
+        assert!(
+            matches!(schema, asyncapi_rust::Schema::Any(_)),
+            "serde_json::Value field must produce Schema::Any; got: {ds}"
+        );
+    }
+}
+
+// ── Untagged serde enums ─────────────────────────────────────────────────────
+
+#[test]
+fn test_untagged_enum() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(untagged)]
+    pub enum UntaggedMsg {
+        Number(i64),
+        Text { content: String },
+        Object { id: u32, label: String },
+    }
+
+    // Must not panic and must return one message per variant
+    let names = UntaggedMsg::asyncapi_message_names();
+    assert_eq!(names, vec!["Number", "Text", "Object"]);
+    assert_eq!(UntaggedMsg::asyncapi_tag_field(), None);
+
+    let messages = UntaggedMsg::asyncapi_messages();
+    assert_eq!(messages.len(), 3);
+
+    // With no tag, all messages fall back to the full schema (anyOf/oneOf union)
+    // — not per-variant. Verify they have payloads and correct names.
+    for msg in &messages {
+        assert!(
+            msg.payload.is_some(),
+            "untagged variant '{}' must have a payload",
+            msg.name.as_deref().unwrap_or("?")
+        );
+    }
+
+    // Payloads should reflect the full union schema — each should contain
+    // the oneOf or anyOf that schemars generates for untagged enums.
+    let number_msg = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("Number"))
+        .expect("Number message must exist");
+    let payload_json = serde_json::to_value(&number_msg.payload).unwrap();
+    // schemars generates oneOf or anyOf for untagged — either is valid
+    let has_union = payload_json.get("oneOf").is_some() || payload_json.get("anyOf").is_some();
+    assert!(
+        has_union,
+        "untagged enum payload should be a union schema; got: {payload_json}"
+    );
+}
+
+// ── Adjacently-tagged serde enums ────────────────────────────────────────────
+
+#[test]
+fn test_adjacently_tagged_enum() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "kind", content = "payload")]
+    pub enum AdjacentMsg {
+        #[serde(rename = "ping")]
+        Ping,
+        #[serde(rename = "data")]
+        Data { value: String, count: u32 },
+    }
+
+    // Must not panic
+    let names = AdjacentMsg::asyncapi_message_names();
+    assert_eq!(names, vec!["Ping", "Data"]);
+    // Tag field is "kind" (the tag half; content is separate)
+    assert_eq!(AdjacentMsg::asyncapi_tag_field(), Some("kind"));
+
+    let messages = AdjacentMsg::asyncapi_messages();
+    assert_eq!(messages.len(), 2);
+
+    for msg in &messages {
+        assert!(
+            msg.payload.is_some(),
+            "adjacently-tagged variant '{}' must have a payload",
+            msg.name.as_deref().unwrap_or("?")
+        );
+    }
+
+    // The "kind" discriminant must appear somewhere in each payload schema.
+    // Whether it's per-variant or the full union depends on schemars' output
+    // for adjacently-tagged enums — we don't assert a specific shape, just
+    // that the schema is present and the discriminant value is represented.
+    let ping = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("Ping"))
+        .expect("Ping must exist");
+    let data = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("Data"))
+        .expect("Data must exist");
+
+    let ping_json = serde_json::to_value(&ping.payload).unwrap();
+    let data_json = serde_json::to_value(&data.payload).unwrap();
+
+    // Both payloads must be non-null JSON objects
+    assert!(ping_json.is_object() || ping_json.is_boolean());
+    assert!(data_json.is_object() || data_json.is_boolean());
+
+    // The wire discriminant value "ping" / "data" must appear somewhere in
+    // the serialized payload schema (either as per-variant const or in the oneOf)
+    let ping_str = serde_json::to_string(&ping_json).unwrap();
+    let data_str = serde_json::to_string(&data_json).unwrap();
+    assert!(
+        ping_str.contains("ping"),
+        "discriminant 'ping' must appear in Ping payload schema"
+    );
+    assert!(
+        data_str.contains("data"),
+        "discriminant 'data' must appear in Data payload schema"
+    );
+}

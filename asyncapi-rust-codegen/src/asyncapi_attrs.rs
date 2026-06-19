@@ -120,4 +120,24 @@ mod tests {
         assert!(meta.triggers_binary);
         assert_eq!(meta.content_type, None);
     }
+
+    #[test]
+    fn test_extract_title() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi(title = "My Message")]
+        }];
+
+        let meta = extract_asyncapi_meta(&attrs);
+        assert_eq!(meta.title, Some("My Message".to_string()));
+    }
+
+    #[test]
+    fn test_extract_message_name() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi(message_name = "CurrentEditorResponse")]
+        }];
+
+        let meta = extract_asyncapi_meta(&attrs);
+        assert_eq!(meta.message_name, Some("CurrentEditorResponse".to_string()));
+    }
 }

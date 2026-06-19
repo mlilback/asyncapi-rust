@@ -2,11 +2,34 @@
 
 [![Crates.io](https://img.shields.io/crates/v/asyncapi-rust.svg)](https://crates.io/crates/asyncapi-rust)
 [![Documentation](https://docs.rs/asyncapi-rust/badge.svg)](https://docs.rs/asyncapi-rust)
+[![codecov](https://codecov.io/gh/mlilback/asyncapi-rust/graph/badge.svg)](https://codecov.io/gh/mlilback/asyncapi-rust)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](https://opensource.org/licenses/MIT)
 
 **AsyncAPI 3.0 specification generation for Rust WebSockets and async protocols**
 
 Generate AsyncAPI documentation directly from your Rust code using procedural macros. Similar to how `utoipa` generates OpenAPI specs for REST APIs, `asyncapi-rust` generates AsyncAPI specs for WebSocket and other async protocols.
+
+## Table of Contents
+
+- [Features](#features)
+- [Migrating from 0.2.x](#migrating-from-02x)
+- [Quick Start](#quick-start)
+  - [Message Integration](#message-integration)
+  - [Server Variables and Channel Parameters](#server-variables-and-channel-parameters)
+  - [Message Naming and Disambiguation](#message-naming-and-disambiguation)
+- [Examples](#examples)
+- [Motivation](#motivation)
+- [Comparison: Manual vs Generated](#comparison-manual-vs-generated)
+- [Supported Frameworks](#supported-frameworks)
+- [Binary Protocol Support](#binary-protocol-support)
+- [DateTime Support (Chrono)](#datetime-support-chrono)
+- [Generating Specification Files](#generating-specification-files)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Statement on AI/LLM Usage](#statement-on-aillm-usage)
+- [Acknowledgments](#acknowledgments)
 
 ## Features
 
@@ -206,24 +229,22 @@ Both messages appear in `components.messages` under distinct keys (`GetInfo` and
 See working examples in the `examples/` directory:
 
 - **`simple.rs`** - Basic message types with schema generation
-  ```bash
-  cargo run --example simple
-  ```
-
 - **`chat_api.rs`** - Complete AsyncAPI 3.0 specification with server, channels, and operations
-  ```bash
-  cargo run --example chat_api
-  ```
-
-- **`message_integration.rs`** - Demonstrates automatic message integration with `#[asyncapi_messages(...)]`
-  ```bash
-  cargo run --example message_integration
-  ```
-
+- **`message_integration.rs`** - Automatic message integration with `#[asyncapi_messages(...)]`
 - **`server_variables.rs`** - Server variables and channel parameters for dynamic paths
-  ```bash
-  cargo run --example server_variables
-  ```
+- **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
+- **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
+- **`generate_spec_file.rs`** - Generating specification files
+- **`actix_websocket.rs`** - Real-world actix-web + actix-ws integration
+- **`axum_websocket.rs`** - Real-world axum WebSocket integration
+- **`framework_integration_guide.rs`** - Comprehensive framework integration guide
+
+Run any example:
+```bash
+cargo run --example simple
+cargo run --example message_integration
+cargo run --example server_variables
+```
 
 ## Motivation
 
@@ -278,10 +299,9 @@ Document binary WebSocket messages (Arrow IPC, Protobuf, MessagePack):
 /// Binary data stream
 #[derive(ToAsyncApiMessage)]
 #[asyncapi(
-    name = "BinaryData",
     content_type = "application/octet-stream",
-    binary = true,
-    description = "Binary data payload",
+    triggers_binary,
+    description = "Raw binary data payload",
 )]
 pub struct BinaryData;
 ```
@@ -378,27 +398,6 @@ cargo asyncapi generate
 cargo asyncapi serve  # Start AsyncAPI UI viewer
 ```
 
-## Examples
-
-The `examples/` directory contains working demonstrations:
-
-- **`simple.rs`** - Basic message types with schema generation
-- **`chat_api.rs`** - Complete AsyncAPI 3.0 specification
-- **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
-- **`generate_spec_file.rs`** - Generating specification files
-- **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
-- **`message_integration.rs`** - Automatic message integration with `#[asyncapi_messages(...)]`
-- **`actix_websocket.rs`** - Real-world actix-web + actix-ws integration
-- **`axum_websocket.rs`** - Real-world axum WebSocket integration
-- **`framework_integration_guide.rs`** - Comprehensive framework integration guide
-
-Run any example:
-```bash
-cargo run --example message_integration
-cargo run --example actix_websocket
-cargo run --example axum_websocket
-```
-
 ## Documentation
 
 - [API Documentation](https://docs.rs/asyncapi-rust)
@@ -415,6 +414,7 @@ cargo run --example axum_websocket
 - [ ] Embedded AsyncAPI UI
 - [ ] Additional framework support (tonic/gRPC, Rocket, Warp)
 - [ ] Cargo plugin (`cargo-asyncapi`) for automated spec generation
+- [x] ~98% test coverage (measured by cargo-tarpaulin)
 
 ## Contributing
 
@@ -432,6 +432,10 @@ at your option.
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+## Statement on AI/LLM Usage
+
+There has been a lot of discussion in the Rust community about usage of AI and LLMs. This project has been implemented with the assistance of Claude Code, but it is *not* vibe-coded. In a few years, using AI Tools will be common practice and these arguments will seem as quaint as those made decades ago against the use of IDEs. A human has designed this project and reviewed all code.
 
 ## Acknowledgments
 

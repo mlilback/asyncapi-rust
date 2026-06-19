@@ -624,4 +624,42 @@ mod tests {
         assert_eq!(param1.name, "userId");
         assert_eq!(param1.examples, vec!["42".to_string()]);
     }
+
+    #[test]
+    fn test_extract_channel_with_description() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_channel(
+                name = "events",
+                address = "/ws/events",
+                description = "Real-time event stream"
+            )]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.channels.len(), 1);
+        let channel = &meta.channels[0];
+        assert_eq!(channel.name, "events");
+        assert_eq!(
+            channel.description,
+            Some("Real-time event stream".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_operation_with_description() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "sendMessage",
+                action = "send",
+                channel = "chat",
+                description = "Send a chat message"
+            )]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.operations.len(), 1);
+        let op = &meta.operations[0];
+        assert_eq!(op.name, "sendMessage");
+        assert_eq!(op.description, Some("Send a chat message".to_string()));
+    }
 }
