@@ -210,7 +210,13 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 
     // Struct to hold message metadata
     struct MessageMeta {
+        /// Stable message identity used in components.messages and asyncapi_message_names().
+        /// Defaults to the Rust variant/type identifier; overridable via
+        /// `#[asyncapi(message_name = "...")]`.
         name: String,
+        /// Wire discriminant value from serde rename (used for payload schema lookup).
+        /// May be an empty string when `#[serde(rename = "")]`; defaults to variant ident.
+        discriminant: String,
         summary: Option<String>,
         description: Option<String>,
         title: Option<String>,
@@ -225,16 +231,26 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 
             for variant in &data_enum.variants {
                 let variant_name = &variant.ident;
+                let variant_ident_str = variant_name.to_string();
 
-                // Check for serde(rename) attribute on variant
-                let message_name = extract_serde_rename(&variant.attrs)
-                    .unwrap_or_else(|| variant_name.to_string());
+                // Wire discriminant: serde rename if present (even if empty), else variant ident.
+                let discriminant = extract_serde_rename(&variant.attrs)
+                    .unwrap_or_else(|| variant_ident_str.clone());
 
                 // Extract asyncapi metadata
                 let asyncapi_meta = extract_asyncapi_meta(&variant.attrs);
 
+                // Message identity: explicit message_name override, else variant ident.
+                // We deliberately do NOT use the serde rename here — it may be empty,
+                // non-unique across enums, or unsuitable as a code identifier.
+                let message_name = asyncapi_meta
+                    .message_name
+                    .clone()
+                    .unwrap_or_else(|| variant_ident_str.clone());
+
                 message_metas.push(MessageMeta {
                     name: message_name,
+                    discriminant,
                     summary: asyncapi_meta.summary,
                     description: asyncapi_meta.description,
                     title: asyncapi_meta.title,
@@ -248,9 +264,15 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
         Data::Struct(_) => {
             // For structs, extract metadata from the struct itself
             let asyncapi_meta = extract_asyncapi_meta(&input.attrs);
+            let struct_name = name.to_string();
+            let message_name = asyncapi_meta
+                .message_name
+                .clone()
+                .unwrap_or_else(|| struct_name.clone());
 
             vec![MessageMeta {
-                name: name.to_string(),
+                name: message_name,
+                discriminant: struct_name,
                 summary: asyncapi_meta.summary,
                 description: asyncapi_meta.description,
                 title: asyncapi_meta.title,
@@ -270,6 +292,8 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 
     // Prepare metadata for message generation
     let message_names_for_gen = messages.iter().map(|m| m.name.as_str());
+    // Wire discriminant for each variant — used to look up per-variant schemas at runtime.
+    let message_discriminants = messages.iter().map(|m| m.discriminant.as_str());
     let message_titles = messages.iter().map(|m| {
         if let Some(ref title) = m.title {
             quote! { Some(#title.to_string()) }
@@ -434,6 +458,10 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 
                     // Metadata arrays are baked in at compile time; schemas resolved at runtime.
                     let names: &[&str] = &[#(#message_names_for_gen),*];
+                    // Discriminants are the serde rename values — used to look up per-variant
+                    // schemas. Separate from names so empty renames and cross-enum collisions
+                    // don't affect message identity.
+                    let discriminants: &[&str] = &[#(#message_discriminants),*];
                     let titles: &[Option<String>] = &[#(#message_titles),*];
                     let summaries: &[Option<String>] = &[#(#message_summaries),*];
                     let descriptions: &[Option<String>] = &[#(#message_descriptions),*];
@@ -442,7 +470,8 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                     let mut messages = Vec::with_capacity(names.len());
                     for i in 0..names.len() {
                         let msg_name = names[i];
-                        let payload = if let Some(v) = variant_schemas.get(msg_name) {
+                        let discriminant = discriminants[i];
+                        let payload = if let Some(v) = variant_schemas.get(discriminant) {
                             serde_json::from_value(v.clone()).ok()
                         } else {
                             // Structs, untagged enums, or variants not in the map:
@@ -771,6 +800,14 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
             quote! {
                 for msg in #type_name::asyncapi_messages() {
                     if let Some(ref name) = msg.name {
+                        if messages.contains_key(name.as_str()) {
+                            panic!(
+                                "asyncapi-rust: message name collision for '{}' from {}. \
+                                 Use #[asyncapi(message_name = \"...\")] on one variant to disambiguate.",
+                                name,
+                                stringify!(#type_name)
+                            );
+                        }
                         messages.insert(name.clone(), msg.clone());
                     }
                 }

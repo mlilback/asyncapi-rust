@@ -82,7 +82,9 @@ fn test_tagged_enum() {
 #[test]
 fn test_renamed_enum() {
     let names = RenamedMessage::asyncapi_message_names();
-    assert_eq!(names, vec!["user.join", "user.leave", "chat.message"]);
+    // Message names are variant identifiers, not serde rename strings.
+    // The serde rename ("user.join" etc.) stays as the wire discriminant in the payload schema.
+    assert_eq!(names, vec!["UserJoin", "UserLeave", "ChatMessage"]);
     assert_eq!(RenamedMessage::asyncapi_message_count(), 3);
     assert_eq!(RenamedMessage::asyncapi_tag_field(), Some("message"));
 }
@@ -169,12 +171,12 @@ fn test_per_variant_schema_non_type_tag() {
 
     let channel_list = messages
         .iter()
-        .find(|m| m.name.as_deref() == Some("channel-list"))
-        .expect("channel-list should exist");
+        .find(|m| m.name.as_deref() == Some("ChannelList"))
+        .expect("ChannelList should exist");
     let data_changed = messages
         .iter()
-        .find(|m| m.name.as_deref() == Some("data-changed"))
-        .expect("data-changed should exist");
+        .find(|m| m.name.as_deref() == Some("DataChanged"))
+        .expect("DataChanged should exist");
 
     let cl_json = serde_json::to_value(&channel_list.payload).unwrap();
     let dc_json = serde_json::to_value(&data_changed.payload).unwrap();
@@ -408,14 +410,15 @@ fn test_asyncapi_with_messages() {
         .messages
         .expect("Should have messages in components");
 
-    // Verify we have all 3 messages (2 from ApiMessage, 1 from SystemMessage)
+    // Verify we have all 3 messages (2 from ApiMessage, 1 from SystemMessage).
+    // Keys and name fields use variant identifiers, not serde rename strings.
     assert_eq!(messages.len(), 3);
 
-    // Verify user.join message
+    // Verify UserJoin message
     let user_join = messages
-        .get("user.join")
-        .expect("Should have user.join message");
-    assert_eq!(user_join.name, Some("user.join".to_string()));
+        .get("UserJoin")
+        .expect("Should have UserJoin message");
+    assert_eq!(user_join.name, Some("UserJoin".to_string()));
     assert_eq!(user_join.summary, Some("User joins".to_string()));
     assert_eq!(
         user_join.description,
@@ -423,18 +426,18 @@ fn test_asyncapi_with_messages() {
     );
     assert!(user_join.payload.is_some());
 
-    // Verify user.leave message
+    // Verify UserLeave message
     let user_leave = messages
-        .get("user.leave")
-        .expect("Should have user.leave message");
-    assert_eq!(user_leave.name, Some("user.leave".to_string()));
+        .get("UserLeave")
+        .expect("Should have UserLeave message");
+    assert_eq!(user_leave.name, Some("UserLeave".to_string()));
     assert_eq!(user_leave.summary, Some("User leaves".to_string()));
 
-    // Verify system.status message
+    // Verify SystemStatus message
     let system_status = messages
-        .get("system.status")
-        .expect("Should have system.status message");
-    assert_eq!(system_status.name, Some("system.status".to_string()));
+        .get("SystemStatus")
+        .expect("Should have SystemStatus message");
+    assert_eq!(system_status.name, Some("SystemStatus".to_string()));
     assert_eq!(system_status.summary, Some("System status".to_string()));
 }
 
@@ -460,14 +463,14 @@ fn test_enum_with_json_value_fields() {
 
     let hello = messages
         .iter()
-        .find(|m| m.name.as_deref() == Some("hello"))
-        .expect("hello message should exist");
+        .find(|m| m.name.as_deref() == Some("Hello"))
+        .expect("Hello message should exist");
     assert!(hello.payload.is_some());
 
     let result = messages
         .iter()
-        .find(|m| m.name.as_deref() == Some("result"))
-        .expect("result message should exist");
+        .find(|m| m.name.as_deref() == Some("Result"))
+        .expect("Result message should exist");
     assert!(result.payload.is_some());
 }
 
@@ -581,4 +584,143 @@ fn test_shared_defs_hoisted_to_components_schemas() {
             "components.messages.{name}.payload has unrewritten refs: {bad:?}"
         );
     }
+}
+
+// Regression for #8: empty serde rename falls back to variant identifier
+#[test]
+fn test_empty_serde_rename_fallback() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "message")]
+    pub enum ResponseMsg {
+        #[serde(rename = "ok")]
+        Ok { value: String },
+        #[serde(rename = "")]
+        Empty,
+    }
+
+    let names = ResponseMsg::asyncapi_message_names();
+    // "Empty" (variant ident) not "" (serde rename)
+    assert!(
+        names.contains(&"Empty"),
+        "empty serde rename must fall back to variant ident; got: {names:?}"
+    );
+    assert!(
+        !names.contains(&""),
+        "empty string must not appear as a message name; got: {names:?}"
+    );
+
+    let messages = ResponseMsg::asyncapi_messages();
+    assert!(
+        messages.iter().any(|m| m.name.as_deref() == Some("Empty")),
+        "Empty message must be findable by variant ident"
+    );
+    assert!(
+        !messages.iter().any(|m| m.name.as_deref() == Some("")),
+        "empty-string message name must not appear"
+    );
+}
+
+// Regression for #8: cross-enum discriminant collision resolved via message_name override
+#[test]
+fn test_cross_enum_collision_resolved_with_message_name() {
+    // Two enums with different roles but the same variant identifier / serde rename.
+    // The response variant uses #[asyncapi(message_name = "...")] to disambiguate.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "message")]
+    pub enum Operation {
+        #[serde(rename = "get-info")]
+        GetInfo { project_id: i64 },
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "message")]
+    pub enum OperationResponse {
+        #[serde(rename = "get-info")]
+        #[asyncapi(message_name = "GetInfoResponse")]
+        GetInfo { id: i64, label: String },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Collision Test", version = "1.0.0")]
+    #[asyncapi_messages(Operation, OperationResponse)]
+    struct CollisionApi;
+
+    let spec = CollisionApi::asyncapi_spec();
+    let messages = spec
+        .components
+        .as_ref()
+        .and_then(|c| c.messages.as_ref())
+        .expect("components.messages must be present");
+
+    // Both messages must be present under distinct keys
+    assert!(
+        messages.contains_key("GetInfo"),
+        "GetInfo (request) must be in components.messages"
+    );
+    assert!(
+        messages.contains_key("GetInfoResponse"),
+        "GetInfoResponse must be in components.messages"
+    );
+    assert_eq!(
+        messages.len(),
+        2,
+        "both messages must survive — no silent overwrite"
+    );
+
+    // Payloads must be distinct (request has project_id, response has label)
+    let req_json = serde_json::to_value(&messages["GetInfo"].payload).unwrap();
+    let res_json = serde_json::to_value(&messages["GetInfoResponse"].payload).unwrap();
+    assert!(
+        req_json.pointer("/properties/project_id").is_some(),
+        "GetInfo payload must have project_id"
+    );
+    assert!(
+        res_json.pointer("/properties/label").is_some(),
+        "GetInfoResponse payload must have label"
+    );
+
+    // Wire discriminant in both payloads must still be "get-info"
+    assert_eq!(
+        req_json
+            .pointer("/properties/message/const")
+            .and_then(|v| v.as_str()),
+        Some("get-info"),
+        "GetInfo discriminant must be 'get-info'"
+    );
+    assert_eq!(
+        res_json
+            .pointer("/properties/message/const")
+            .and_then(|v| v.as_str()),
+        Some("get-info"),
+        "GetInfoResponse discriminant must be 'get-info'"
+    );
+}
+
+// Regression for #8: message_name attribute is honoured for naming in components.messages
+#[test]
+fn test_message_name_override_attribute() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum Event {
+        #[serde(rename = "editor-update")]
+        #[asyncapi(message_name = "EditorUpdate", summary = "Editor state changed")]
+        Update { content: String },
+    }
+
+    let names = Event::asyncapi_message_names();
+    assert_eq!(names, vec!["EditorUpdate"]);
+
+    let messages = Event::asyncapi_messages();
+    let msg = &messages[0];
+    assert_eq!(msg.name.as_deref(), Some("EditorUpdate"));
+    assert_eq!(msg.summary.as_deref(), Some("Editor state changed"));
+
+    // Wire discriminant in the payload must still be "editor-update"
+    let payload_json = serde_json::to_value(&msg.payload).unwrap();
+    assert_eq!(
+        payload_json
+            .pointer("/properties/type/const")
+            .and_then(|v| v.as_str()),
+        Some("editor-update")
+    );
 }

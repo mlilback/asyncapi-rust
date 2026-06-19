@@ -10,6 +10,9 @@ pub struct AsyncApiMeta {
     pub title: Option<String>,
     pub content_type: Option<String>,
     pub triggers_binary: bool,
+    /// Override the message name used in `components.messages` and `asyncapi_message_names()`.
+    /// When absent the Rust variant/type identifier is used.
+    pub message_name: Option<String>,
 }
 
 /// Extract asyncapi metadata from `#[asyncapi(...)]` attributes
@@ -41,6 +44,10 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
             } else if nested.path.is_ident("triggers_binary") {
                 // Flag attribute (no value)
                 meta.triggers_binary = true;
+            } else if nested.path.is_ident("message_name") {
+                let value = nested.value()?;
+                let s: syn::LitStr = value.parse()?;
+                meta.message_name = Some(s.value());
             }
             Ok(())
         });
