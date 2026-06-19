@@ -132,8 +132,7 @@ use asyncapi_rust::AsyncApi;
     parameter(
         name = "userId",
         description = "User ID for this WebSocket connection",
-        schema_type = "integer",
-        format = "int64"
+        examples = ["42", "100"]
     )
 )]
 struct UserApi;
@@ -146,11 +145,13 @@ struct UserApi;
 - `default`: Default value if not provided
 - `enum_values`: Restricted set of allowed values
 
-**Channel parameters** define typed path parameters with:
+**Channel parameters** define path parameters with:
 - `name`: Parameter name (required)
 - `description`: Human-readable description
-- `schema_type`: JSON Schema type (e.g., "integer", "string")
-- `format`: JSON Schema format (e.g., "int64", "uuid")
+- `default`: Default value if not provided
+- `enum_values`: Restricted set of allowed values (e.g., `["v1", "v2"]`)
+- `examples`: Example values for documentation (e.g., `["42", "100"]`)
+- `location`: Runtime expression for the parameter's location
 
 ## Examples
 
