@@ -12,6 +12,7 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 ## Table of Contents
 
 - [Features](#features)
+- [Migrating from 0.3.x](#migrating-from-03x)
 - [Migrating from 0.2.x](#migrating-from-02x)
 - [Quick Start](#quick-start)
   - [Message Integration](#message-integration)
@@ -40,6 +41,21 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 - 🌐 **Framework agnostic**: Works with actix-ws, axum, or any serde-compatible types
 - 📦 **Binary protocols**: Support for mixed text/binary WebSocket messages (Arrow IPC, Protobuf, etc.)
 
+## Migrating from 0.3.x
+
+**Breaking change in 0.4.0:** all map-typed fields on model structs (`servers`, `channels`, `operations`, `components.messages`, `components.schemas`, `properties`, etc.) changed from `std::collections::HashMap` to `indexmap::IndexMap`. This makes generated spec output byte-stable across builds — previously `HashMap`'s random iteration order caused churn in downstream TypeScript codegen and other consumers even when the API hadn't changed.
+
+If you construct model structs directly (e.g. in tests or a custom spec builder), replace `HashMap::new()` with `IndexMap::new()`. `indexmap` is re-exported from `asyncapi_rust` so you don't need to add it to your own `Cargo.toml`:
+
+```rust
+use asyncapi_rust::indexmap::IndexMap;
+
+let mut servers = IndexMap::new();
+servers.insert("production".to_string(), my_server);
+```
+
+Code that only _reads_ from these fields (iterating, `.get()`, `.contains_key()`) compiles unchanged — `IndexMap` has the same API as `HashMap` for read operations.
+
 ## Migrating from 0.2.x
 
 **Breaking change in 0.3.0:** message names in `components.messages` and `asyncapi_message_names()` now derive from the **Rust variant identifier**, not the serde rename string.
@@ -64,7 +80,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-asyncapi-rust = "0.3"
+asyncapi-rust = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 schemars = { version = "1.1", features = ["derive"] }
 
@@ -330,7 +346,7 @@ pub enum TimestampedMessage {
 **Cargo.toml configuration:**
 ```toml
 [dependencies]
-asyncapi-rust = "0.3"
+asyncapi-rust = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 schemars = { version = "1.1", features = ["derive", "chrono04"] }
 ```
