@@ -25,6 +25,7 @@ syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 schemars = "1.1"
+indexmap = { version = "2", features = ["serde"] }
 
 [profile.release]
 opt-level = 3

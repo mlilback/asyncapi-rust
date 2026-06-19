@@ -385,7 +385,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                 /// by this type's variants. The `AsyncApi` derive collects them into
                 /// `components.schemas` so message payloads can reference them via
                 /// `#/components/schemas/X` instead of embedding them inline.
-                pub fn asyncapi_schemas() -> std::collections::HashMap<String, asyncapi_rust::Schema>
+                pub fn asyncapi_schemas() -> asyncapi_rust::indexmap::IndexMap<String, asyncapi_rust::Schema>
                 where
                     Self: schemars::JsonSchema,
                 {
@@ -394,7 +394,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                     let schema_json = serde_json::to_value(&schema)
                         .expect("Failed to serialize schema");
 
-                    let mut result = std::collections::HashMap::new();
+                    let mut result = asyncapi_rust::indexmap::IndexMap::new();
                     if let Some(defs) = schema_json.get("$defs").and_then(|v| v.as_object()) {
                         for (name, def_schema) in defs {
                             let mut def = def_schema.clone();
@@ -424,8 +424,8 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 
                     // Build a discriminant→schema map using the actual serde tag field name.
                     let tag_field = Self::asyncapi_tag_field();
-                    let mut variant_schemas: std::collections::HashMap<String, serde_json::Value> =
-                        std::collections::HashMap::new();
+                    let mut variant_schemas: asyncapi_rust::indexmap::IndexMap<String, serde_json::Value> =
+                        asyncapi_rust::indexmap::IndexMap::new();
                     if let Some(tag) = tag_field {
                         if let Some(variants) = schema_json.get("oneOf").and_then(|v| v.as_array()) {
                             for variant in variants {
@@ -627,7 +627,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
 
                 quote! {
                     {
-                        let mut server_variables = std::collections::HashMap::new();
+                        let mut server_variables = asyncapi_rust::indexmap::IndexMap::new();
                         #(#var_entries)*
                         Some(server_variables)
                     }
@@ -650,7 +650,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
 
         quote! {
             {
-                let mut servers = std::collections::HashMap::new();
+                let mut servers = asyncapi_rust::indexmap::IndexMap::new();
                 #(#server_entries)*
                 Some(servers)
             }
@@ -719,7 +719,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
 
                 quote! {
                     {
-                        let mut channel_parameters = std::collections::HashMap::new();
+                        let mut channel_parameters = asyncapi_rust::indexmap::IndexMap::new();
                         #(#param_entries)*
                         Some(channel_parameters)
                     }
@@ -740,7 +740,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
 
         quote! {
             {
-                let mut channels = std::collections::HashMap::new();
+                let mut channels = asyncapi_rust::indexmap::IndexMap::new();
                 #(#channel_entries)*
                 Some(channels)
             }
@@ -785,7 +785,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
 
         quote! {
             {
-                let mut operations = std::collections::HashMap::new();
+                let mut operations = asyncapi_rust::indexmap::IndexMap::new();
                 #(#operation_entries)*
                 Some(operations)
             }
@@ -820,8 +820,8 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
 
         quote! {
             {
-                let mut messages = std::collections::HashMap::new();
-                let mut schemas = std::collections::HashMap::new();
+                let mut messages = asyncapi_rust::indexmap::IndexMap::new();
+                let mut schemas = asyncapi_rust::indexmap::IndexMap::new();
                 #(#type_calls)*
                 Some(asyncapi_rust::Components {
                     messages: if messages.is_empty() { None } else { Some(messages) },

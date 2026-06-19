@@ -21,6 +21,7 @@ asyncapi-rust-models = { version = "0.3.0", path = "../asyncapi-rust-models" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
+indexmap = { workspace = true }
 
 [dev-dependencies]
 # For testing generated code

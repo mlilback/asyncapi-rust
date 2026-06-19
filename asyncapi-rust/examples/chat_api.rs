@@ -9,10 +9,9 @@
 
 use asyncapi_rust::{
     AsyncApiSpec, Channel, Components, Info, Message, Operation, OperationAction, Server,
-    ToAsyncApiMessage, schemars::JsonSchema,
+    ToAsyncApiMessage, indexmap::IndexMap, schemars::JsonSchema,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// WebSocket messages for a chat application
 ///
@@ -124,7 +123,7 @@ fn main() {
 /// Build a complete AsyncAPI specification with server, channels, and operations
 fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
     // Define server
-    let mut servers = HashMap::new();
+    let mut servers = IndexMap::new();
     servers.insert(
         "production".to_string(),
         Server {
@@ -137,7 +136,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
     );
 
     // Define channel
-    let mut channels = HashMap::new();
+    let mut channels = IndexMap::new();
     channels.insert(
         "chat".to_string(),
         Channel {
@@ -148,7 +147,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
     );
 
     // Define operations (send and receive)
-    let mut operations = HashMap::new();
+    let mut operations = IndexMap::new();
 
     operations.insert(
         "sendMessage".to_string(),
@@ -195,7 +194,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
     );
 
     // Define components with messages
-    let mut component_messages = HashMap::new();
+    let mut component_messages = IndexMap::new();
     for message in messages {
         if let Some(name) = &message.name {
             component_messages.insert(name.clone(), message);

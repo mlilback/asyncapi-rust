@@ -26,7 +26,7 @@
 //!
 //! ```rust
 //! use asyncapi_rust_models::*;
-//! use std::collections::HashMap;
+//! use indexmap::IndexMap;
 //!
 //! // Create a simple AsyncAPI specification
 //! let spec = AsyncApiSpec {
@@ -49,8 +49,8 @@
 #![deny(missing_docs)]
 #![warn(clippy::all)]
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// AsyncAPI 3.0 Specification
 ///
@@ -87,15 +87,15 @@ pub struct AsyncApiSpec {
 
     /// Server connection details
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub servers: Option<HashMap<String, Server>>,
+    pub servers: Option<IndexMap<String, Server>>,
 
     /// Available channels (communication paths)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub channels: Option<HashMap<String, Channel>>,
+    pub channels: Option<IndexMap<String, Channel>>,
 
     /// Operations (send/receive)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub operations: Option<HashMap<String, Operation>>,
+    pub operations: Option<IndexMap<String, Operation>>,
 
     /// Reusable components (messages, schemas, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,9 +135,9 @@ pub struct Info {
 ///
 /// ```rust
 /// use asyncapi_rust_models::{Server, ServerVariable};
-/// use std::collections::HashMap;
+/// use indexmap::IndexMap;
 ///
-/// let mut variables = HashMap::new();
+/// let mut variables = IndexMap::new();
 /// variables.insert("userId".to_string(), ServerVariable {
 ///     description: Some("User ID for connection".to_string()),
 ///     default: None,
@@ -183,7 +183,7 @@ pub struct Server {
     ///
     /// A map of variable name to ServerVariable definition for variables used in the pathname
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub variables: Option<HashMap<String, ServerVariable>>,
+    pub variables: Option<IndexMap<String, ServerVariable>>,
 }
 
 /// Server variable definition
@@ -240,9 +240,9 @@ pub struct ServerVariable {
 ///
 /// ```rust
 /// use asyncapi_rust_models::{Channel, Parameter};
-/// use std::collections::HashMap;
+/// use indexmap::IndexMap;
 ///
-/// let mut parameters = HashMap::new();
+/// let mut parameters = IndexMap::new();
 /// parameters.insert("userId".to_string(), Parameter {
 ///     description: Some("User ID for this WebSocket connection".to_string()),
 ///     default: None,
@@ -272,13 +272,13 @@ pub struct Channel {
     /// A map of message identifiers to message definitions or references.
     /// Messages define the structure of data that flows through this channel.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub messages: Option<HashMap<String, MessageRef>>,
+    pub messages: Option<IndexMap<String, MessageRef>>,
 
     /// Channel parameters
     ///
     /// A map of parameter names to their schema definitions for variables used in the address
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<HashMap<String, Parameter>>,
+    pub parameters: Option<IndexMap<String, Parameter>>,
 }
 
 /// Channel parameter definition
@@ -380,7 +380,7 @@ pub enum MessageRef {
 ///
 /// ```rust
 /// use asyncapi_rust_models::{Message, Schema, SchemaObject};
-/// use std::collections::HashMap;
+/// use indexmap::IndexMap;
 ///
 /// let message = Message {
 ///     name: Some("ChatMessage".to_string()),
@@ -401,7 +401,7 @@ pub enum MessageRef {
 ///         one_of: None,
 ///         any_of: None,
 ///         all_of: None,
-///         additional: HashMap::new(),
+///         additional: IndexMap::new(),
 ///     }))),
 /// };
 /// ```
@@ -508,11 +508,11 @@ pub struct ChannelRef {
 pub struct Components {
     /// Message definitions
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub messages: Option<HashMap<String, Message>>,
+    pub messages: Option<IndexMap<String, Message>>,
 
     /// Schema definitions
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub schemas: Option<HashMap<String, Schema>>,
+    pub schemas: Option<IndexMap<String, Schema>>,
 }
 
 /// JSON Schema object
@@ -539,7 +539,7 @@ pub struct Components {
 ///
 /// ```rust
 /// use asyncapi_rust_models::{Schema, SchemaObject};
-/// use std::collections::HashMap;
+/// use indexmap::IndexMap;
 ///
 /// let schema = Schema::Object(Box::new(SchemaObject {
 ///     schema_type: Some(serde_json::json!("object")),
@@ -554,7 +554,7 @@ pub struct Components {
 ///     one_of: None,
 ///     any_of: None,
 ///     all_of: None,
-///     additional: HashMap::new(),
+///     additional: IndexMap::new(),
 /// }));
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -591,7 +591,7 @@ pub enum Schema {
 ///
 /// ```rust
 /// use asyncapi_rust_models::{Schema, SchemaObject};
-/// use std::collections::HashMap;
+/// use indexmap::IndexMap;
 ///
 /// // String property schema
 /// let username_schema = Schema::Object(Box::new(SchemaObject {
@@ -607,11 +607,11 @@ pub enum Schema {
 ///     one_of: None,
 ///     any_of: None,
 ///     all_of: None,
-///     additional: HashMap::new(),
+///     additional: IndexMap::new(),
 /// }));
 ///
 /// // Object schema with properties
-/// let mut properties = HashMap::new();
+/// let mut properties = IndexMap::new();
 /// properties.insert("username".to_string(), Box::new(username_schema));
 ///
 /// let message_schema = SchemaObject {
@@ -627,7 +627,7 @@ pub enum Schema {
 ///     one_of: None,
 ///     any_of: None,
 ///     all_of: None,
-///     additional: HashMap::new(),
+///     additional: IndexMap::new(),
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -643,7 +643,7 @@ pub struct SchemaObject {
     ///
     /// Map of property names to their schemas when schema_type is "object"
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<HashMap<String, Box<Schema>>>,
+    pub properties: Option<IndexMap<String, Box<Schema>>>,
 
     /// Required properties
     ///
@@ -712,7 +712,7 @@ pub struct SchemaObject {
     ///
     /// Captures any additional JSON Schema properties not explicitly defined above
     #[serde(flatten)]
-    pub additional: HashMap<String, serde_json::Value>,
+    pub additional: IndexMap<String, serde_json::Value>,
 }
 
 impl Default for AsyncApiSpec {

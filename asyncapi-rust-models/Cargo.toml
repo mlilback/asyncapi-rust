@@ -16,6 +16,7 @@ readme = "../README.md"
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+indexmap = { workspace = true }
 
 [dev-dependencies]
 # For testing serialization

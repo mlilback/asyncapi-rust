@@ -151,6 +151,11 @@ pub use schemars;
 pub use serde::{Deserialize, Serialize};
 pub use serde_json;
 
+// Hidden re-export so generated code can use `asyncapi_rust::indexmap::IndexMap`
+// without users needing to add indexmap to their own Cargo.toml.
+#[doc(hidden)]
+pub use indexmap;
+
 #[cfg(test)]
 mod tests {
     #[test]
