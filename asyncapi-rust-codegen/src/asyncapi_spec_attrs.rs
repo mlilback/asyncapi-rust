@@ -23,6 +23,26 @@ pub struct ServerMeta {
     pub pathname: Option<String>,
     pub description: Option<String>,
     pub variables: Vec<ServerVariableMeta>,
+    pub mqtt: Option<MqttServerBindingsMeta>
+}
+
+#[derive(Debug, Clone)]
+pub struct LastWillMeta {
+    pub topic: String,
+    pub qos: u8,
+    pub retain: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MqttServerBindingsMeta {
+    pub client_id: Option<String>,
+    pub clean_session: Option<bool>,
+    pub last_will: Option<LastWillMeta>,
+    pub keep_alive: Option<u32>,
+    pub session_expiry_interval: Option<Path>,
+    pub maximum_packet_size: Option<Path>,
+    pub binding_version: Option<String>
 }
 
 /// Server variable metadata
@@ -64,6 +84,15 @@ pub struct OperationMeta {
     pub channel: String,
     #[allow(dead_code)] // Reserved for future use
     pub description: Option<String>,
+    pub mqtt: Option<OperationMqttBindingsMeta>
+}
+
+#[derive(Debug, Clone)]
+pub struct OperationMqttBindingsMeta {
+    pub qos: Option<u8>,
+    pub retain: Option<bool>,
+    pub message_expiry_interval: Option<Path>,
+    pub binding_version: Option<String>
 }
 
 /// Extract asyncapi spec metadata from `#[asyncapi(...)]` attributes
@@ -133,6 +162,7 @@ fn extract_server(attr: &Attribute) -> Option<ServerMeta> {
     let mut pathname = None;
     let mut description = None;
     let mut variables = Vec::new();
+    let mut mqtt = None;
 
     let _ = attr.parse_nested_meta(|nested| {
         if nested.path.is_ident("name") {
@@ -160,6 +190,10 @@ fn extract_server(attr: &Attribute) -> Option<ServerMeta> {
             if let Some(var) = extract_server_variable(&nested) {
                 variables.push(var);
             }
+        } else if nested.path.is_ident("mqtt") {
+            if let Some(var) = extract_mqtt_server_bindings(&nested) {
+                mqtt = Some(var);
+            }
         }
         Ok(())
     });
@@ -172,6 +206,123 @@ fn extract_server(attr: &Attribute) -> Option<ServerMeta> {
         pathname,
         description,
         variables,
+        mqtt
+    })
+}
+
+fn extract_mqtt_server_bindings(
+    nested: &syn::meta::ParseNestedMeta,
+) -> Option<MqttServerBindingsMeta> {
+    let mut client_id: Option<String> = None;
+    let mut clean_session: Option<bool> = None;
+    let mut keep_alive = None;
+    let mut session_expiry_interval = None;
+    let mut maximum_packet_size = None;
+    let mut binding_version: Option<String> = None;
+
+    let mut last_will: Option<LastWillMeta> = None;
+
+    let _ = nested.parse_nested_meta(|inner| {
+        if inner.path.is_ident("client_id") {
+            let value = inner.value()?;
+            let s: syn::LitStr = value.parse()?;
+            client_id = Some(s.value());
+
+        } else if inner.path.is_ident("clean_session") {
+            let value = inner.value()?;
+            let s: syn::LitBool = value.parse()?;
+            clean_session = Some(s.value());
+
+        } else if inner.path.is_ident("keep_alive") {
+            let value = inner.value()?;
+            let s: syn::LitInt = value.parse()?;
+            keep_alive = Some(s.base10_parse()?);
+
+        } else if inner.path.is_ident("session_expiry_interval") {
+            let value = inner.value()?;
+            let p: Path = value.parse()?;
+            session_expiry_interval = Some(p);
+
+        } else if inner.path.is_ident("maximum_packet_size") {
+            let value = inner.value()?;
+            let p: Path = value.parse()?;
+            maximum_packet_size = Some(p);
+
+        } else if inner.path.is_ident("binding_version") {
+            let value = inner.value()?;
+            let s: syn::LitStr = value.parse()?;
+            binding_version = Some(s.value());
+
+        } else if inner.path.is_ident("last_will") {
+            let mut topic: Option<String> = None;
+            let mut qos: Option<u8> = None;
+            let mut message: Option<String> = None;
+            let mut retain: Option<bool> = None;
+
+            inner.parse_nested_meta(|lw| {
+                if lw.path.is_ident("topic") {
+                    let value = lw.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    topic = Some(s.value());
+
+                } else if lw.path.is_ident("qos") {
+                    let value = lw.value()?;
+                    let s: syn::LitInt = value.parse()?;
+                    qos = Some(s.base10_parse()?);
+
+                } else if lw.path.is_ident("message") {
+                    let value = lw.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    message = Some(s.value());
+
+                } else if lw.path.is_ident("retain") {
+                    let value = lw.value()?;
+                    let s: syn::LitBool = value.parse()?;
+                    retain = Some(s.value());
+                }
+
+                Ok(())
+            })?;
+
+            last_will = Some(LastWillMeta {
+                topic: topic.ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        &inner.path,
+                        "missing required field `topic` in last_will",
+                    )
+                })?,
+                qos: qos.ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        &inner.path,
+                        "missing required field `qos` in last_will",
+                    )
+                })?,
+                message: message.ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        &inner.path,
+                        "missing required field `message` in last_will",
+                    )
+                })?,
+                retain: retain.ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        &inner.path,
+                        "missing required field `retain` in last_will",
+                    )
+                })?,
+            });
+        }
+
+            Ok(())
+    });
+
+    Some(MqttServerBindingsMeta {
+        client_id,
+        clean_session,
+        binding_version,
+        last_will,
+        keep_alive,
+        maximum_packet_size,
+        session_expiry_interval
     })
 }
 
