@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn test_extract_multiple() {
         let attrs: Vec<Attribute> = vec![parse_quote! {
-            #[asyncapi(summary = "Send message", description = "Sends a chat message to a room", mqtt(response_topic = "/a/b/d"))]
+            #[asyncapi(summary = "Send message", description = "Sends a chat message to a room")]
         }];
 
         let meta = extract_asyncapi_meta(&attrs);
@@ -148,6 +148,15 @@ mod tests {
             meta.description,
             Some("Sends a chat message to a room".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_multiple_with_mqtt_bindings() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi(mqtt(response_topic = "/a/b/d"))]
+        }];
+
+        let meta = extract_asyncapi_meta(&attrs);
         assert_eq!(
             meta.mqtt,
             Some(MqttMessageBindingsMeta {
