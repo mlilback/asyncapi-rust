@@ -1,6 +1,6 @@
 //! Utilities for parsing asyncapi spec-level attributes
 
-use syn::{Attribute, Path};
+use syn::{Attribute, LitStr, Path};
 
 /// AsyncAPI spec metadata extracted from attributes
 #[derive(Debug, Default, Clone)]
@@ -23,7 +23,7 @@ pub struct ServerMeta {
     pub pathname: Option<String>,
     pub description: Option<String>,
     pub variables: Vec<ServerVariableMeta>,
-    pub mqtt: Option<MqttServerBindingsMeta>
+    pub mqtt: Option<MqttServerBindingsMeta>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,9 +40,9 @@ pub struct MqttServerBindingsMeta {
     pub clean_session: Option<bool>,
     pub last_will: Option<LastWillMeta>,
     pub keep_alive: Option<u32>,
-    pub session_expiry_interval: Option<Path>,
+    pub session_expiry_interval: Option<u32>,
     pub maximum_packet_size: Option<Path>,
-    pub binding_version: Option<String>
+    pub binding_version: Option<String>,
 }
 
 /// Server variable metadata
@@ -84,15 +84,15 @@ pub struct OperationMeta {
     pub channel: String,
     #[allow(dead_code)] // Reserved for future use
     pub description: Option<String>,
-    pub mqtt: Option<OperationMqttBindingsMeta>
+    pub mqtt: Option<OperationMqttBindingsMeta>,
 }
 
 #[derive(Debug, Clone)]
 pub struct OperationMqttBindingsMeta {
     pub qos: Option<u8>,
     pub retain: Option<bool>,
-    pub message_expiry_interval: Option<Path>,
-    pub binding_version: Option<String>
+    pub message_expiry_interval: Option<u32>,
+    pub binding_version: Option<String>,
 }
 
 /// Extract asyncapi spec metadata from `#[asyncapi(...)]` attributes
@@ -206,7 +206,7 @@ fn extract_server(attr: &Attribute) -> Option<ServerMeta> {
         pathname,
         description,
         variables,
-        mqtt
+        mqtt,
     })
 }
 
@@ -227,32 +227,26 @@ fn extract_mqtt_server_bindings(
             let value = inner.value()?;
             let s: syn::LitStr = value.parse()?;
             client_id = Some(s.value());
-
         } else if inner.path.is_ident("clean_session") {
             let value = inner.value()?;
             let s: syn::LitBool = value.parse()?;
             clean_session = Some(s.value());
-
         } else if inner.path.is_ident("keep_alive") {
             let value = inner.value()?;
             let s: syn::LitInt = value.parse()?;
             keep_alive = Some(s.base10_parse()?);
-
         } else if inner.path.is_ident("session_expiry_interval") {
             let value = inner.value()?;
-            let p: Path = value.parse()?;
-            session_expiry_interval = Some(p);
-
+            let p: syn::LitInt = value.parse()?;
+            session_expiry_interval = Some(p.base10_parse()?);
         } else if inner.path.is_ident("maximum_packet_size") {
             let value = inner.value()?;
             let p: Path = value.parse()?;
             maximum_packet_size = Some(p);
-
         } else if inner.path.is_ident("binding_version") {
             let value = inner.value()?;
             let s: syn::LitStr = value.parse()?;
             binding_version = Some(s.value());
-
         } else if inner.path.is_ident("last_will") {
             let mut topic: Option<String> = None;
             let mut qos: Option<u8> = None;
@@ -264,17 +258,14 @@ fn extract_mqtt_server_bindings(
                     let value = lw.value()?;
                     let s: syn::LitStr = value.parse()?;
                     topic = Some(s.value());
-
                 } else if lw.path.is_ident("qos") {
                     let value = lw.value()?;
                     let s: syn::LitInt = value.parse()?;
                     qos = Some(s.base10_parse()?);
-
                 } else if lw.path.is_ident("message") {
                     let value = lw.value()?;
                     let s: syn::LitStr = value.parse()?;
                     message = Some(s.value());
-
                 } else if lw.path.is_ident("retain") {
                     let value = lw.value()?;
                     let s: syn::LitBool = value.parse()?;
@@ -312,7 +303,7 @@ fn extract_mqtt_server_bindings(
             });
         }
 
-            Ok(())
+        Ok(())
     });
 
     Some(MqttServerBindingsMeta {
@@ -322,7 +313,7 @@ fn extract_mqtt_server_bindings(
         last_will,
         keep_alive,
         maximum_packet_size,
-        session_expiry_interval
+        session_expiry_interval,
     })
 }
 
@@ -468,12 +459,50 @@ fn extract_channel_parameter(nested: &syn::meta::ParseNestedMeta) -> Option<Para
     })
 }
 
+fn extract_mqtt_operation_bindings(
+    nested: &syn::meta::ParseNestedMeta,
+) -> Option<OperationMqttBindingsMeta> {
+    let mut qos = None;
+    let mut retain = None;
+    let mut message_expiry_interval = None;
+    let mut binding_version = None;
+
+    let _ = nested.parse_nested_meta(|inner| {
+        if inner.path.is_ident("qos") {
+            let value = inner.value()?;
+            let s: syn::LitInt = value.parse()?;
+            qos = Some(s.base10_parse()?);
+        } else if inner.path.is_ident("retain") {
+            let value = inner.value()?;
+            let s: syn::LitBool = value.parse()?;
+            retain = Some(s.value());
+        } else if inner.path.is_ident("message_expiry_interval") {
+            let value = inner.value()?;
+            let p: syn::LitInt = value.parse()?;
+            message_expiry_interval = Some(p.base10_parse()?);
+        } else if inner.path.is_ident("binding_version") {
+            let value = inner.value()?;
+            let s: LitStr = value.parse()?;
+            binding_version = Some(s.value());
+        }
+        Ok(())
+    });
+
+    Some(OperationMqttBindingsMeta {
+        qos,
+        retain,
+        message_expiry_interval,
+        binding_version,
+    })
+}
+
 /// Extract operation metadata from `#[asyncapi_operation(...)]` attribute
 fn extract_operation(attr: &Attribute) -> Option<OperationMeta> {
     let mut name = None;
     let mut action = None;
     let mut channel = None;
     let mut description = None;
+    let mut mqtt = None;
 
     let _ = attr.parse_nested_meta(|nested| {
         if nested.path.is_ident("name") {
@@ -492,6 +521,8 @@ fn extract_operation(attr: &Attribute) -> Option<OperationMeta> {
             let value = nested.value()?;
             let s: syn::LitStr = value.parse()?;
             description = Some(s.value());
+        } else if nested.path.is_ident("mqtt") {
+            mqtt = extract_mqtt_operation_bindings(&nested);
         }
         Ok(())
     });
@@ -502,6 +533,7 @@ fn extract_operation(attr: &Attribute) -> Option<OperationMeta> {
         action: action?,
         channel: channel?,
         description,
+        mqtt,
     })
 }
 

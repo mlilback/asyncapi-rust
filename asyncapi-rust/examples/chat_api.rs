@@ -132,6 +132,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
             pathname: None,
             description: Some("Production WebSocket server".to_string()),
             variables: None,
+            bindings: None,
         },
     );
 
@@ -168,6 +169,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
                     })
                     .collect(),
             ),
+            bindings: None,
         },
     );
 
@@ -190,6 +192,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
                     })
                     .collect(),
             ),
+            bindings: None,
         },
     );
 

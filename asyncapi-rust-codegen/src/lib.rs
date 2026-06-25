@@ -634,6 +634,56 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 }
             };
 
+            let bindings = if let Some(mqtt) = &server.mqtt {
+                let client_id = if let Some(s) = mqtt.client_id {
+                    quote! { Some(#s.to_string()) }
+                } else {
+                    quote! { None }
+                };
+                let clean_session = if let Some(s) = mqtt.clean_session {
+                    quote! { Some(#s.to_string()) }
+                } else {
+                    quote! { None }
+                };
+                let last_will = if let Some(lw) = mqtt.last_will {
+                    let topic = lw.topic;
+                    let qos = lw.qos;
+                    let retain = lw.retain;
+                    let message = lw.message;
+                    quote! {
+                        Some(
+                            asyncapi_rust::LastWill {
+                                topic: quote! { #topic.to_string() },
+                                qos: quote! { #qos },
+                                retain: quote! { #retain },
+                                message: quote! { #message.to_string() }
+                            }
+                        )
+                    }
+                } else {
+                    quote! { None }
+                };
+                let binding_version = mqtt.binding_version.as_deref();
+                let session_expiry_interval = mqtt.session_expiry_interval.as_ref().map(|v| {
+                    quote! {
+                        asyncapi_rust::Schema::Any(serde_json::json!(#v))
+                    }
+                });
+
+                quote! {
+                    Some(asyncapi_rust::ServerBindings {
+                        mqtt: Some(asyncapi_rust::MqttServerBindings {
+                            client_id: #client_id,
+                            client_session: #client_session,
+                            session_expiry_interval: #session_expiry_interval,
+                            binding_version: #binding_version.map(|s| s.to_string()),
+                        })
+                    })
+                }
+            } else {
+                quote! { None }
+            };
+
             quote! {
                 servers.insert(
                     #name.to_string(),
@@ -769,6 +819,30 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 .to_compile_error();
             };
 
+            let bindings = if let Some(mqtt) = &operation.mqtt {
+                let qos = mqtt.qos;
+                let retain = mqtt.retain;
+                let binding_version = mqtt.binding_version.as_deref();
+                let message_expiry = mqtt.message_expiry_interval.as_ref().map(|v| {
+                    quote! {
+                        asyncapi_rust::Schema::Any(serde_json::json!(#v))
+                    }
+                });
+
+                quote! {
+                    Some(asyncapi_rust::OperationBindings {
+                        mqtt: Some(asyncapi_rust::MqttOperationBindings {
+                            qos: #qos,
+                            retain: #retain,
+                            message_expiry_interval: #message_expiry,
+                            binding_version: #binding_version.map(|s| s.to_string()),
+                        })
+                    })
+                }
+            } else {
+                quote! { None }
+            };
+
             quote! {
                 operations.insert(
                     #name.to_string(),
@@ -778,6 +852,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                             reference: format!("#/channels/{}", #channel_ref),
                         },
                         messages: None,
+                        bindings: #bindings
                     }
                 );
             }
