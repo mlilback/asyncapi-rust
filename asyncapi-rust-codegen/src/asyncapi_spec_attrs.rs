@@ -41,6 +41,7 @@ pub struct MqttServerBindingsMeta {
     pub last_will: Option<LastWillMeta>,
     pub keep_alive: Option<u32>,
     pub session_expiry_interval: Option<u32>,
+    #[allow(unused)]
     pub maximum_packet_size: Option<Path>,
     pub binding_version: Option<String>,
 }

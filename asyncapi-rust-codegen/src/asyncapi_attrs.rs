@@ -4,6 +4,7 @@ use syn::{Attribute, Meta, Path};
 
 #[derive(Clone, Debug)]
 pub enum ResponseTopic {
+    #[allow(unused)]
     Reference(Path),
     Uri(String),
 }
@@ -15,7 +16,7 @@ impl Default for ResponseTopic {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct MqttMessageBinding {
+pub struct MqttMessageBindingsMeta {
     pub payload_format_indicator: Option<u8>,
     pub correlation_data: Option<Path>,
     pub content_type: Option<String>,
@@ -34,7 +35,7 @@ pub struct AsyncApiMeta {
     /// Override the message name used in `components.messages` and `asyncapi_message_names()`.
     /// When absent the Rust variant/type identifier is used.
     pub message_name: Option<String>,
-    pub mqtt: Option<MqttMessageBinding>,
+    pub mqtt: Option<MqttMessageBindingsMeta>,
 }
 
 fn parse_response_topic(meta: Meta) -> Option<ResponseTopic> {
@@ -91,7 +92,7 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
                 let s: syn::LitStr = value.parse()?;
                 meta.message_name = Some(s.value());
             } else if nested.path.is_ident("mqtt") {
-                let mut binding = MqttMessageBinding::default();
+                let mut binding = MqttMessageBindingsMeta::default();
 
                 let value = nested.value()?;
                 let mqtt_meta: syn::MetaList = value.parse()?;
