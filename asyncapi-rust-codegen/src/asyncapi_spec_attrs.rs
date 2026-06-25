@@ -249,58 +249,49 @@ fn extract_mqtt_server_bindings(
             let s: syn::LitStr = value.parse()?;
             binding_version = Some(s.value());
         } else if inner.path.is_ident("last_will") {
+            let content;
+            syn::parenthesized!(content in inner.input);
+
             let mut topic: Option<String> = None;
             let mut qos: Option<u8> = None;
             let mut message: Option<String> = None;
             let mut retain: Option<bool> = None;
 
-            inner.parse_nested_meta(|lw| {
-                if lw.path.is_ident("topic") {
-                    let value = lw.value()?;
-                    let s: syn::LitStr = value.parse()?;
-                    topic = Some(s.value());
-                } else if lw.path.is_ident("qos") {
-                    let value = lw.value()?;
-                    let s: syn::LitInt = value.parse()?;
-                    qos = Some(s.base10_parse()?);
-                } else if lw.path.is_ident("message") {
-                    let value = lw.value()?;
-                    let s: syn::LitStr = value.parse()?;
-                    message = Some(s.value());
-                } else if lw.path.is_ident("retain") {
-                    let value = lw.value()?;
-                    let s: syn::LitBool = value.parse()?;
-                    retain = Some(s.value());
+            while !content.is_empty() {
+                let key: syn::Ident = content.parse()?;
+                content.parse::<syn::Token![:]>()?;
+
+                match key.to_string().as_str() {
+                    "topic" => {
+                        let v: syn::LitStr = content.parse()?;
+                        topic = Some(v.value());
+                    }
+                    "qos" => {
+                        let v: syn::LitInt = content.parse()?;
+                        qos = Some(v.base10_parse()?);
+                    }
+                    "message" => {
+                        let v: syn::LitStr = content.parse()?;
+                        message = Some(v.value());
+                    }
+                    "retain" => {
+                        let v: syn::LitBool = content.parse()?;
+                        retain = Some(v.value());
+                    }
+                    _ => {}
                 }
 
-                Ok(())
-            })?;
+                let _ = content.parse::<syn::Token![,]>();
+            }
 
             last_will = Some(LastWillMeta {
-                topic: topic.ok_or_else(|| {
-                    syn::Error::new_spanned(
-                        &inner.path,
-                        "missing required field `topic` in last_will",
-                    )
-                })?,
-                qos: qos.ok_or_else(|| {
-                    syn::Error::new_spanned(
-                        &inner.path,
-                        "missing required field `qos` in last_will",
-                    )
-                })?,
-                message: message.ok_or_else(|| {
-                    syn::Error::new_spanned(
-                        &inner.path,
-                        "missing required field `message` in last_will",
-                    )
-                })?,
-                retain: retain.ok_or_else(|| {
-                    syn::Error::new_spanned(
-                        &inner.path,
-                        "missing required field `retain` in last_will",
-                    )
-                })?,
+                topic: topic
+                    .ok_or_else(|| syn::Error::new_spanned(&inner.path, "missing topic"))?,
+                qos: qos.ok_or_else(|| syn::Error::new_spanned(&inner.path, "missing qos"))?,
+                message: message
+                    .ok_or_else(|| syn::Error::new_spanned(&inner.path, "missing message"))?,
+                retain: retain
+                    .ok_or_else(|| syn::Error::new_spanned(&inner.path, "missing retain"))?,
             });
         }
 
@@ -755,6 +746,42 @@ mod tests {
         let var1 = &server.variables[1];
         assert_eq!(var1.name, "userId");
         assert_eq!(var1.examples, vec!["12".to_string(), "13".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_server_with_mqtt_bindings() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_server(
+                name = "staging",
+                host = "staging.example.com",
+                protocol = "wss",
+                pathname = "/api/{version}/ws/{userId}",
+                mqtt(
+                    client_id = "abc",
+                    last_will(
+                        topic: "a",
+                        qos: 0,
+                        message: "B",
+                        retain: true
+                    )
+                )
+            )]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        let server = &meta.servers[0];
+
+        let mqtt = &server.mqtt;
+
+        assert!(mqtt.is_some());
+        let mqtt = mqtt.clone().unwrap();
+        assert_eq!(mqtt.client_id, Some("abc".to_string()));
+        assert!(mqtt.last_will.is_some());
+        let lw = mqtt.last_will.unwrap();
+        assert_eq!(lw.topic, "a".to_string());
+        assert_eq!(lw.qos, 0);
+        assert_eq!(lw.message, "B".to_string());
+        assert!(lw.retain)
     }
 
     #[test]

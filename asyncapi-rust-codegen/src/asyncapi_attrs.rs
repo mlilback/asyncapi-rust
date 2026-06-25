@@ -1,8 +1,8 @@
 //! Utilities for parsing asyncapi attributes
 
-use syn::{Attribute, Meta, Path};
+use syn::{Attribute, Path};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ResponseTopic {
     #[allow(unused)]
     Reference(Path),
@@ -15,7 +15,7 @@ impl Default for ResponseTopic {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct MqttMessageBindingsMeta {
     pub payload_format_indicator: Option<u8>,
     pub correlation_data: Option<Path>,
@@ -38,22 +38,13 @@ pub struct AsyncApiMeta {
     pub mqtt: Option<MqttMessageBindingsMeta>,
 }
 
-fn parse_response_topic(meta: Meta) -> Option<ResponseTopic> {
-    match meta {
-        Meta::Path(path) => Some(ResponseTopic::Reference(path)),
-
-        Meta::NameValue(nv) => {
-            match nv.value {
-                syn::Expr::Lit(expr_lit) => {
-                    match expr_lit.lit {
-                        syn::Lit::Str(s) => Some(ResponseTopic::Uri(s.value())),
-                        _ => None, // invalid literal → ignore
-                    }
-                }
-                _ => None,
-            }
-        }
-
+fn parse_response_topic(expr: syn::Expr) -> Option<ResponseTopic> {
+    match expr {
+        syn::Expr::Lit(expr_lit) => match expr_lit.lit {
+            syn::Lit::Str(s) => Some(ResponseTopic::Uri(s.value())),
+            _ => None,
+        },
+        syn::Expr::Path(expr_path) => Some(ResponseTopic::Reference(expr_path.path)),
         _ => None,
     }
 }
@@ -94,10 +85,7 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
             } else if nested.path.is_ident("mqtt") {
                 let mut binding = MqttMessageBindingsMeta::default();
 
-                let value = nested.value()?;
-                let mqtt_meta: syn::MetaList = value.parse()?;
-
-                mqtt_meta.parse_nested_meta(|m| {
+                nested.parse_nested_meta(|m| {
                     if m.path.is_ident("payload_format_indicator") {
                         let v = m.value()?;
                         let lit: syn::LitInt = v.parse()?;
@@ -105,7 +93,6 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
                     } else if m.path.is_ident("correlation_data") {
                         let v = m.value()?;
                         let s: syn::Path = v.parse()?;
-
                         binding.correlation_data = Some(s);
                     } else if m.path.is_ident("content_type") {
                         let v = m.value()?;
@@ -113,9 +100,8 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
                         binding.content_type = Some(s.value());
                     } else if m.path.is_ident("response_topic") {
                         let v = m.value()?;
-                        let meta_inner: syn::Meta = v.parse()?;
-
-                        binding.response_topic = parse_response_topic(meta_inner);
+                        let expr: syn::Expr = v.parse()?;
+                        binding.response_topic = parse_response_topic(expr);
                     } else if m.path.is_ident("binding_version") {
                         let v = m.value()?;
                         let s: syn::LitStr = v.parse()?;
@@ -153,7 +139,7 @@ mod tests {
     #[test]
     fn test_extract_multiple() {
         let attrs: Vec<Attribute> = vec![parse_quote! {
-            #[asyncapi(summary = "Send message", description = "Sends a chat message to a room")]
+            #[asyncapi(summary = "Send message", description = "Sends a chat message to a room", mqtt(response_topic = "/a/b/d"))]
         }];
 
         let meta = extract_asyncapi_meta(&attrs);
@@ -162,6 +148,16 @@ mod tests {
             meta.description,
             Some("Sends a chat message to a room".to_string())
         );
+        assert_eq!(
+            meta.mqtt,
+            Some(MqttMessageBindingsMeta {
+                response_topic: Some(ResponseTopic::Uri("/a/b/d".to_string())),
+                payload_format_indicator: None,
+                content_type: None,
+                correlation_data: None,
+                binding_version: None
+            })
+        )
     }
 
     #[test]
