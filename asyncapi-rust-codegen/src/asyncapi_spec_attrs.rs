@@ -635,6 +635,26 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_operation_with_mqtt_binding() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", mqtt(qos = 1, retain = true))]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs);
+        assert_eq!(meta.operations.len(), 1);
+        assert_eq!(meta.operations[0].name, "sendMessage");
+        assert_eq!(meta.operations[0].action, "send");
+        assert_eq!(meta.operations[0].channel, "chat");
+
+        assert!(meta.operations[0].mqtt.is_some());
+        let mqtt = meta.operations[0].mqtt.clone().unwrap();
+        assert_eq!(mqtt.qos, Some(1));
+        assert!(mqtt.retain.unwrap());
+        assert!(mqtt.binding_version.is_none());
+        assert!(mqtt.message_expiry_interval.is_none());
+    }
+
+    #[test]
     fn test_extract_multiple_components() {
         let attrs: Vec<Attribute> = vec![
             parse_quote! { #[asyncapi(title = "Chat API", version = "1.0.0")] },
