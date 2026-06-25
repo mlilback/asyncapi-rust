@@ -184,6 +184,70 @@ pub struct Server {
     /// A map of variable name to ServerVariable definition for variables used in the pathname
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variables: Option<IndexMap<String, ServerVariable>>,
+
+    /// Protocol specific bindings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bindings: Option<ServerBindings>,
+}
+
+/// Protocol specific server bindings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerBindings {
+    /// Mqtt protocol specific bindings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mqtt: Option<MqttServerBindings>,
+}
+
+/// Mqtt last will structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MqttLastWill {
+    /// The topic where the Last Will and Testament message will be sent.
+    pub topic: String,
+
+    /// Defines how hard the broker/client will try to ensure that the Last Will and Testament message is received. Its value MUST be either 0, 1 or 2.
+    pub qos: u8,
+
+    /// Last Will message.
+    pub message: String,
+
+    /// Whether the broker should retain the Last Will and Testament message or not.
+    pub retain: bool,
+}
+
+/// Mqtt server binding
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MqttServerBindings {
+    /// The client identifier.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "cliendId")]
+    pub client_id: Option<String>,
+
+    /// Whether to create a persistent connection or not. When false,
+    /// the connection will be persistent. This is called clean start in MQTTv5.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "cleanSession")]
+    pub clean_session: Option<bool>,
+
+    /// Last Will and Testament configuration. topic, qos, message and retain are properties of this object as shown below.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "lastWill")]
+    pub last_will: Option<MqttLastWill>,
+
+    /// Interval in seconds of the longest period of time the broker and the client can endure without sending a message.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "keepAlive")]
+    pub keep_alive: Option<u32>,
+
+    /// Interval in seconds or a Schema Object containing the definition of the interval. The broker maintains a session for a disconnected client until this interval expires.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "sessionExpiryInterval"
+    )]
+    pub session_expiry_interval: Option<Schema>,
+
+    /// Number of bytes or a Schema Object representing the maximum packet size the client is willing to accept.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "maximumPacketSize")]
+    pub max_packet_size: Option<Schema>,
+
+    /// The version of this binding. If omitted, "latest" MUST be assumed.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
+    pub binding_version: Option<String>,
 }
 
 /// Server variable definition
@@ -446,6 +510,45 @@ pub struct Message {
     /// JSON Schema defining the structure of the message payload
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<Schema>,
+
+    /// Protocol specific bindings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bindings: Option<MessageBindings>,
+}
+
+/// Protocol specific message bindings
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MessageBindings {
+    /// Mqtt protocol specific message bindings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mqtt: Option<MqttMessageBindings>,
+}
+
+/// Mqtt message bindings
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MqttMessageBindings {
+    /// Either: 0 (zero): Indicates that the payload is unspecified bytes, or 1: Indicates that the payload is UTF-8 encoded character data.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "payloadFormatIndicator"
+    )]
+    pub payload_format_indicator: Option<u8>,
+
+    /// Correlation Data is used by the sender of the request message to identify which request the response message is for when it is received.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "correlationData")]
+    pub correlation_data: Option<Schema>,
+
+    /// String describing the content type of the message payload. This should not conflict with the contentType field of the associated AsyncAPI Message object.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "contentType")]
+    pub content_type: Option<String>,
+
+    /// The topic (channel URI) for a response message.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "responseTopic")]
+    pub response_topic: Option<Schema>,
+
+    /// The version of this binding. If omitted, "latest" MUST be assumed.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
+    pub binding_version: Option<String>,
 }
 
 /// Operation (send or receive)
@@ -483,6 +586,42 @@ pub struct Operation {
     /// Optional list of messages that can be used with this operation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Vec<MessageRef>>,
+
+    /// Protocol specific bindings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bindings: Option<OperationBindings>,
+}
+
+/// Protocol specific operation bindings
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OperationBindings {
+    /// Mqtt specific operation bindings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mqtt: Option<MqttOperationBindings>,
+}
+
+/// Mqtt operation bindings
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MqttOperationBindings {
+    /// Defines the Quality of Service (QoS) levels for the message flow between client and server.
+    /// Its value MUST be either 0 (At most once delivery), 1 (At least once delivery), or 2 (Exactly once delivery).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qos: Option<u8>,
+
+    /// Whether the broker should retain the message or not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retain: Option<bool>,
+
+    /// Interval in seconds or a Schema Object containing the definition of the lifetime of the message.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "messageExpiryInterval"
+    )]
+    pub message_expiry_interval: Option<Schema>,
+
+    /// The version of this binding. If omitted, "latest" MUST be assumed.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
+    pub binding_version: Option<String>,
 }
 
 /// Operation action type

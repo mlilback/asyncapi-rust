@@ -1,6 +1,28 @@
 //! Utilities for parsing asyncapi attributes
 
-use syn::Attribute;
+use syn::{Attribute, Path};
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ResponseTopic {
+    #[allow(unused)]
+    Reference(Path),
+    Uri(String),
+}
+
+impl Default for ResponseTopic {
+    fn default() -> Self {
+        Self::Uri(String::default())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MqttMessageBindingsMeta {
+    pub payload_format_indicator: Option<u8>,
+    pub correlation_data: Option<Path>,
+    pub content_type: Option<String>,
+    pub response_topic: Option<ResponseTopic>,
+    pub binding_version: Option<String>,
+}
 
 /// AsyncAPI metadata extracted from attributes
 #[derive(Debug, Default, Clone)]
@@ -13,6 +35,18 @@ pub struct AsyncApiMeta {
     /// Override the message name used in `components.messages` and `asyncapi_message_names()`.
     /// When absent the Rust variant/type identifier is used.
     pub message_name: Option<String>,
+    pub mqtt: Option<MqttMessageBindingsMeta>,
+}
+
+fn parse_response_topic(expr: syn::Expr) -> Option<ResponseTopic> {
+    match expr {
+        syn::Expr::Lit(expr_lit) => match expr_lit.lit {
+            syn::Lit::Str(s) => Some(ResponseTopic::Uri(s.value())),
+            _ => None,
+        },
+        syn::Expr::Path(expr_path) => Some(ResponseTopic::Reference(expr_path.path)),
+        _ => None,
+    }
 }
 
 /// Extract asyncapi metadata from `#[asyncapi(...)]` attributes
@@ -48,6 +82,36 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
                 let value = nested.value()?;
                 let s: syn::LitStr = value.parse()?;
                 meta.message_name = Some(s.value());
+            } else if nested.path.is_ident("mqtt") {
+                let mut binding = MqttMessageBindingsMeta::default();
+
+                nested.parse_nested_meta(|m| {
+                    if m.path.is_ident("payload_format_indicator") {
+                        let v = m.value()?;
+                        let lit: syn::LitInt = v.parse()?;
+                        binding.payload_format_indicator = Some(lit.base10_parse::<u8>()?);
+                    } else if m.path.is_ident("correlation_data") {
+                        let v = m.value()?;
+                        let s: syn::Path = v.parse()?;
+                        binding.correlation_data = Some(s);
+                    } else if m.path.is_ident("content_type") {
+                        let v = m.value()?;
+                        let s: syn::LitStr = v.parse()?;
+                        binding.content_type = Some(s.value());
+                    } else if m.path.is_ident("response_topic") {
+                        let v = m.value()?;
+                        let expr: syn::Expr = v.parse()?;
+                        binding.response_topic = parse_response_topic(expr);
+                    } else if m.path.is_ident("binding_version") {
+                        let v = m.value()?;
+                        let s: syn::LitStr = v.parse()?;
+                        binding.binding_version = Some(s.value());
+                    }
+
+                    Ok(())
+                })?;
+
+                meta.mqtt = Some(binding);
             }
             Ok(())
         });
@@ -84,6 +148,25 @@ mod tests {
             meta.description,
             Some("Sends a chat message to a room".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_multiple_with_mqtt_bindings() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi(mqtt(response_topic = "/a/b/d"))]
+        }];
+
+        let meta = extract_asyncapi_meta(&attrs);
+        assert_eq!(
+            meta.mqtt,
+            Some(MqttMessageBindingsMeta {
+                response_topic: Some(ResponseTopic::Uri("/a/b/d".to_string())),
+                payload_format_indicator: None,
+                content_type: None,
+                correlation_data: None,
+                binding_version: None
+            })
+        )
     }
 
     #[test]
