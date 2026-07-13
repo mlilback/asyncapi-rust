@@ -349,10 +349,41 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
             let response_topic = match &mqtt.response_topic {
                 Some(crate::asyncapi_attrs::ResponseTopic::Uri(t)) => {
                     quote! {
-                        Some(crate::asyncapi_attrs::ResponseTopic::Uri(#t.to_string()))
+                        Some(asyncapi_rust::MqttReponseTopic::Uri(
+                            #t.to_string()
+                        ))
+                    }
+                }
+                Some(crate::asyncapi_attrs::ResponseTopic::Reference(r)) => {
+                    quote! {
+                        Some(asyncapi_rust::MqttReponseTopic::Schema({
+                            let schema = schemars::schema_for!(#r);
+
+                            let schema_json = serde_json::to_value(&schema)
+                                .expect("Failed to serialize schema");
+
+                            serde_json::from_value(schema_json)
+                                .expect("Failed to deserialize schema")
+                        }))
                     }
                 }
                 _ => quote! { None },
+            };
+
+            let correlation_data = if let Some(c) = &mqtt.correlation_data {
+                quote! {
+                    Some({
+                        let schema = schemars::schema_for!(#c);
+
+                        let schema_json = serde_json::to_value(&schema)
+                            .expect("Failed to serialize schema");
+
+                        serde_json::from_value::<asyncapi_rust::Schema>(schema_json)
+                            .expect("Failed to deserialize schema")
+                    })
+                }
+            } else {
+                quote! { None }
             };
 
             quote! {
@@ -363,7 +394,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                             content_type: #content_type,
                             binding_version: #binding_version,
                             response_topic: #response_topic,
-                            correlation_data: None
+                            correlation_data: #correlation_data
                         })
                     }
                 )
@@ -690,7 +721,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     quote! { None }
                 };
                 let clean_session = if let Some(s) = mqtt.clean_session {
-                    quote! { Some(#s.to_string()) }
+                    quote! { Some(#s) }
                 } else {
                     quote! { None }
                 };
@@ -701,11 +732,11 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     let message = &lw.message;
                     quote! {
                         Some(
-                            asyncapi_rust::LastWill {
-                                topic: quote! { #topic.to_string() },
-                                qos: quote! { #qos },
-                                retain: quote! { #retain },
-                                message: quote! { #message.to_string() }
+                            asyncapi_rust::MqttLastWill {
+                                topic: #topic.to_string(),
+                                qos: #qos,
+                                retain: #retain,
+                                message: #message.to_string()
                             }
                         )
                     }
@@ -731,15 +762,22 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     quote! { None }
                 };
 
+                let max_packet_size = if let Some(s) = &mqtt.maximum_packet_size {
+                    quote! { Some(#s) }
+                } else {
+                    quote! { None }
+                };
+
                 quote! {
                     Some(asyncapi_rust::ServerBindings {
                         mqtt: Some(asyncapi_rust::MqttServerBindings {
                             client_id: #client_id,
-                            client_session: #clean_session,
+                            clean_session: #clean_session,
                             session_expiry_interval: #session_expiry_interval,
                             binding_version: #binding_version,
                             last_will: #last_will,
-                            keep_alive: #keep_alive
+                            keep_alive: #keep_alive,
+                            max_packet_size: #max_packet_size
                         })
                     })
                 }
@@ -884,14 +922,51 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
             };
 
             let bindings = if let Some(mqtt) = &operation.mqtt {
-                let qos = mqtt.qos;
-                let retain = mqtt.retain;
-                let binding_version = mqtt.binding_version.as_deref();
-                let message_expiry = mqtt.message_expiry_interval.as_ref().map(|v| {
-                    quote! {
-                        asyncapi_rust::Schema::Any(serde_json::json!(#v))
+                let qos = if let Some(s) = mqtt.qos {
+                    quote! { Some(#s) }
+                } else {
+                    quote! { None }
+                };
+
+                let retain = if let Some(b) = mqtt.retain {
+                    quote! { Some(#b) }
+                } else {
+                    quote! { None }
+                };
+
+                let binding_version = if let Some(s) = &mqtt.binding_version {
+                    quote! { Some(#s.to_string()) }
+                } else {
+                    quote! { None }
+                };
+
+                let message_expiry = match &mqtt.message_expiry_interval {
+                    Some(crate::asyncapi_spec_attrs::MqttMessageExpiryIntervalMeta::Interval(
+                        t,
+                    )) => {
+                        quote! {
+                            Some(asyncapi_rust::MqttMessageExpiryInterval::Interval(
+                                #t
+                            ))
+                        }
                     }
-                });
+                    Some(crate::asyncapi_spec_attrs::MqttMessageExpiryIntervalMeta::Reference(
+                        r,
+                    )) => {
+                        quote! {
+                            Some(asyncapi_rust::MqttMessageExpiryInterval::Schema({
+                                let schema = schemars::schema_for!(#r);
+
+                                let schema_json = serde_json::to_value(&schema)
+                                    .expect("Failed to serialize schema");
+
+                                serde_json::from_value(schema_json)
+                                    .expect("Failed to deserialize schema")
+                            }))
+                        }
+                    }
+                    _ => quote! { None },
+                };
 
                 quote! {
                     Some(asyncapi_rust::OperationBindings {
@@ -899,7 +974,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                             qos: #qos,
                             retain: #retain,
                             message_expiry_interval: #message_expiry,
-                            binding_version: #binding_version.map(|s| s.to_string()),
+                            binding_version: #binding_version,
                         })
                     })
                 }

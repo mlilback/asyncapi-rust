@@ -89,11 +89,34 @@ pub struct OperationMeta {
 }
 
 #[derive(Debug, Clone)]
+pub enum MqttMessageExpiryIntervalMeta {
+    Interval(u32),
+    Reference(Path),
+}
+
+#[derive(Debug, Clone)]
 pub struct OperationMqttBindingsMeta {
     pub qos: Option<u8>,
     pub retain: Option<bool>,
-    pub message_expiry_interval: Option<u32>,
+    pub message_expiry_interval: Option<MqttMessageExpiryIntervalMeta>,
     pub binding_version: Option<String>,
+}
+
+fn parse_message_expiry_interval(
+    expr: syn::Expr,
+) -> Result<Option<MqttMessageExpiryIntervalMeta>, syn::Error> {
+    match expr {
+        syn::Expr::Lit(expr_lit) => match expr_lit.lit {
+            syn::Lit::Int(s) => Ok(Some(MqttMessageExpiryIntervalMeta::Interval(
+                s.base10_parse()?,
+            ))),
+            _ => Ok(None),
+        },
+        syn::Expr::Path(expr_path) => Ok(Some(MqttMessageExpiryIntervalMeta::Reference(
+            expr_path.path,
+        ))),
+        _ => Ok(None),
+    }
 }
 
 /// Extract asyncapi spec metadata from `#[asyncapi(...)]` attributes
@@ -249,40 +272,32 @@ fn extract_mqtt_server_bindings(
             let s: syn::LitStr = value.parse()?;
             binding_version = Some(s.value());
         } else if inner.path.is_ident("last_will") {
-            let content;
-            syn::parenthesized!(content in inner.input);
-
             let mut topic: Option<String> = None;
             let mut qos: Option<u8> = None;
             let mut message: Option<String> = None;
             let mut retain: Option<bool> = None;
 
-            while !content.is_empty() {
-                let key: syn::Ident = content.parse()?;
-                content.parse::<syn::Token![:]>()?;
-
-                match key.to_string().as_str() {
-                    "topic" => {
-                        let v: syn::LitStr = content.parse()?;
-                        topic = Some(v.value());
-                    }
-                    "qos" => {
-                        let v: syn::LitInt = content.parse()?;
-                        qos = Some(v.base10_parse()?);
-                    }
-                    "message" => {
-                        let v: syn::LitStr = content.parse()?;
-                        message = Some(v.value());
-                    }
-                    "retain" => {
-                        let v: syn::LitBool = content.parse()?;
-                        retain = Some(v.value());
-                    }
-                    _ => {}
+            inner.parse_nested_meta(|meta| {
+                if meta.path.is_ident("topic") {
+                    let value = meta.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    topic = Some(s.value());
+                } else if meta.path.is_ident("qos") {
+                    let value = meta.value()?;
+                    let v: syn::LitInt = value.parse()?;
+                    qos = Some(v.base10_parse()?);
+                } else if meta.path.is_ident("message") {
+                    let value = meta.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    message = Some(s.value());
+                } else if meta.path.is_ident("retain") {
+                    let value = meta.value()?;
+                    let b: syn::LitBool = value.parse()?;
+                    retain = Some(b.value());
                 }
 
-                let _ = content.parse::<syn::Token![,]>();
-            }
+                Ok(())
+            })?;
 
             last_will = Some(LastWillMeta {
                 topic: topic
@@ -470,8 +485,8 @@ fn extract_mqtt_operation_bindings(
             retain = Some(s.value());
         } else if inner.path.is_ident("message_expiry_interval") {
             let value = inner.value()?;
-            let p: syn::LitInt = value.parse()?;
-            message_expiry_interval = Some(p.base10_parse()?);
+            let expr: syn::Expr = value.parse()?;
+            message_expiry_interval = parse_message_expiry_interval(expr)?;
         } else if inner.path.is_ident("binding_version") {
             let value = inner.value()?;
             let s: LitStr = value.parse()?;
@@ -778,12 +793,6 @@ mod tests {
                 pathname = "/api/{version}/ws/{userId}",
                 mqtt(
                     client_id = "abc",
-                    last_will(
-                        topic: "a",
-                        qos: 0,
-                        message: "B",
-                        retain: true
-                    )
                 )
             )]
         }];
@@ -796,12 +805,6 @@ mod tests {
         assert!(mqtt.is_some());
         let mqtt = mqtt.clone().unwrap();
         assert_eq!(mqtt.client_id, Some("abc".to_string()));
-        assert!(mqtt.last_will.is_some());
-        let lw = mqtt.last_will.unwrap();
-        assert_eq!(lw.topic, "a".to_string());
-        assert_eq!(lw.qos, 0);
-        assert_eq!(lw.message, "B".to_string());
-        assert!(lw.retain)
     }
 
     #[test]

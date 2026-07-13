@@ -4,7 +4,6 @@ use syn::{Attribute, Path};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ResponseTopic {
-    #[allow(unused)]
     Reference(Path),
     Uri(String),
 }

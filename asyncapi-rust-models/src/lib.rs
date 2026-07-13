@@ -151,9 +151,10 @@ pub struct Info {
 ///     pathname: Some("/api/ws/{userId}".to_string()),
 ///     description: Some("Production WebSocket server".to_string()),
 ///     variables: Some(variables),
+///     ..Default::default()
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Server {
     /// Server URL or host
     ///
@@ -186,7 +187,7 @@ pub struct Server {
     pub variables: Option<IndexMap<String, ServerVariable>>,
 
     /// Protocol specific bindings.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bindings: Option<ServerBindings>,
 }
 
@@ -218,7 +219,7 @@ pub struct MqttLastWill {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MqttServerBindings {
     /// The client identifier.
-    #[serde(skip_serializing_if = "Option::is_none", rename = "cliendId")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "clientId")]
     pub client_id: Option<String>,
 
     /// Whether to create a persistent connection or not. When false,
@@ -414,6 +415,7 @@ pub struct Parameter {
 ///     description: None,
 ///     content_type: Some("application/json".to_string()),
 ///     payload: None,
+///     ..Default::default()
 /// }));
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -467,9 +469,10 @@ pub enum MessageRef {
 ///         all_of: None,
 ///         additional: IndexMap::new(),
 ///     }))),
+///     ..Default::default()
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Message {
     /// Message name
     ///
@@ -512,7 +515,7 @@ pub struct Message {
     pub payload: Option<Schema>,
 
     /// Protocol specific bindings.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bindings: Option<MessageBindings>,
 }
 
@@ -522,6 +525,16 @@ pub struct MessageBindings {
     /// Mqtt protocol specific message bindings
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mqtt: Option<MqttMessageBindings>,
+}
+
+/// Mqtt response topic
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum MqttReponseTopic {
+    /// Topic Uri
+    Uri(String),
+    /// Schema for the the response topic
+    Schema(Schema),
 }
 
 /// Mqtt message bindings
@@ -544,7 +557,7 @@ pub struct MqttMessageBindings {
 
     /// The topic (channel URI) for a response message.
     #[serde(skip_serializing_if = "Option::is_none", rename = "responseTopic")]
-    pub response_topic: Option<Schema>,
+    pub response_topic: Option<MqttReponseTopic>,
 
     /// The version of this binding. If omitted, "latest" MUST be assumed.
     #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
@@ -567,9 +580,10 @@ pub struct MqttMessageBindings {
 ///         reference: "#/channels/chat".to_string(),
 ///     },
 ///     messages: None,
+///     ..Default::default()
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Operation {
     /// Operation action (send or receive)
     ///
@@ -588,7 +602,7 @@ pub struct Operation {
     pub messages: Option<Vec<MessageRef>>,
 
     /// Protocol specific bindings
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bindings: Option<OperationBindings>,
 }
 
@@ -598,6 +612,16 @@ pub struct OperationBindings {
     /// Mqtt specific operation bindings
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mqtt: Option<MqttOperationBindings>,
+}
+
+/// Interval in seconds or a Schema Object containing the definition of the lifetime of the message.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum MqttMessageExpiryInterval {
+    /// Interval in seconds
+    Interval(u32),
+    /// Schema Object containing the definition of the lifetime of the message
+    Schema(Schema),
 }
 
 /// Mqtt operation bindings
@@ -617,7 +641,7 @@ pub struct MqttOperationBindings {
         skip_serializing_if = "Option::is_none",
         rename = "messageExpiryInterval"
     )]
-    pub message_expiry_interval: Option<Schema>,
+    pub message_expiry_interval: Option<MqttMessageExpiryInterval>,
 
     /// The version of this binding. If omitted, "latest" MUST be assumed.
     #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
@@ -625,17 +649,18 @@ pub struct MqttOperationBindings {
 }
 
 /// Operation action type
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum OperationAction {
     /// Send message
+    #[default]
     Send,
     /// Receive message
     Receive,
 }
 
 /// Reference to a channel
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChannelRef {
     /// $ref path
     #[serde(rename = "$ref")]
