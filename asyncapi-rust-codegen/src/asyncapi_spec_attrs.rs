@@ -35,14 +35,19 @@ pub struct LastWillMeta {
 }
 
 #[derive(Debug, Clone)]
+pub enum MqttBindingNumValueMeta {
+    Value(u32),
+    Reference(Path),
+}
+
+#[derive(Debug, Clone)]
 pub struct MqttServerBindingsMeta {
     pub client_id: Option<String>,
     pub clean_session: Option<bool>,
     pub last_will: Option<LastWillMeta>,
     pub keep_alive: Option<u32>,
-    pub session_expiry_interval: Option<u32>,
-    #[allow(unused)]
-    pub maximum_packet_size: Option<Path>,
+    pub session_expiry_interval: Option<MqttBindingNumValueMeta>,
+    pub maximum_packet_size: Option<MqttBindingNumValueMeta>,
     pub binding_version: Option<String>,
 }
 
@@ -89,32 +94,22 @@ pub struct OperationMeta {
 }
 
 #[derive(Debug, Clone)]
-pub enum MqttMessageExpiryIntervalMeta {
-    Interval(u32),
-    Reference(Path),
-}
-
-#[derive(Debug, Clone)]
 pub struct OperationMqttBindingsMeta {
     pub qos: Option<u8>,
     pub retain: Option<bool>,
-    pub message_expiry_interval: Option<MqttMessageExpiryIntervalMeta>,
+    pub message_expiry_interval: Option<MqttBindingNumValueMeta>,
     pub binding_version: Option<String>,
 }
 
-fn parse_message_expiry_interval(
+fn parse_mqtt_binding_value(
     expr: syn::Expr,
-) -> Result<Option<MqttMessageExpiryIntervalMeta>, syn::Error> {
+) -> Result<Option<MqttBindingNumValueMeta>, syn::Error> {
     match expr {
         syn::Expr::Lit(expr_lit) => match expr_lit.lit {
-            syn::Lit::Int(s) => Ok(Some(MqttMessageExpiryIntervalMeta::Interval(
-                s.base10_parse()?,
-            ))),
+            syn::Lit::Int(s) => Ok(Some(MqttBindingNumValueMeta::Value(s.base10_parse()?))),
             _ => Ok(None),
         },
-        syn::Expr::Path(expr_path) => Ok(Some(MqttMessageExpiryIntervalMeta::Reference(
-            expr_path.path,
-        ))),
+        syn::Expr::Path(expr_path) => Ok(Some(MqttBindingNumValueMeta::Reference(expr_path.path))),
         _ => Ok(None),
     }
 }
@@ -260,13 +255,13 @@ fn extract_mqtt_server_bindings(
             let s: syn::LitInt = value.parse()?;
             keep_alive = Some(s.base10_parse()?);
         } else if inner.path.is_ident("session_expiry_interval") {
-            let value = inner.value()?;
-            let p: syn::LitInt = value.parse()?;
-            session_expiry_interval = Some(p.base10_parse()?);
+            let v = inner.value()?;
+            let expr: syn::Expr = v.parse()?;
+            session_expiry_interval = parse_mqtt_binding_value(expr)?;
         } else if inner.path.is_ident("maximum_packet_size") {
-            let value = inner.value()?;
-            let p: Path = value.parse()?;
-            maximum_packet_size = Some(p);
+            let v = inner.value()?;
+            let expr: syn::Expr = v.parse()?;
+            maximum_packet_size = parse_mqtt_binding_value(expr)?;
         } else if inner.path.is_ident("binding_version") {
             let value = inner.value()?;
             let s: syn::LitStr = value.parse()?;
@@ -486,7 +481,7 @@ fn extract_mqtt_operation_bindings(
         } else if inner.path.is_ident("message_expiry_interval") {
             let value = inner.value()?;
             let expr: syn::Expr = value.parse()?;
-            message_expiry_interval = parse_message_expiry_interval(expr)?;
+            message_expiry_interval = parse_mqtt_binding_value(expr)?;
         } else if inner.path.is_ident("binding_version") {
             let value = inner.value()?;
             let s: LitStr = value.parse()?;

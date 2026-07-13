@@ -347,14 +347,14 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                 quote! { None }
             };
             let response_topic = match &mqtt.response_topic {
-                Some(crate::asyncapi_attrs::ResponseTopic::Uri(t)) => {
+                Some(crate::asyncapi_attrs::ResponseTopicMeta::Uri(t)) => {
                     quote! {
                         Some(asyncapi_rust::MqttReponseTopic::Uri(
                             #t.to_string()
                         ))
                     }
                 }
-                Some(crate::asyncapi_attrs::ResponseTopic::Reference(r)) => {
+                Some(crate::asyncapi_attrs::ResponseTopicMeta::Reference(r)) => {
                     quote! {
                         Some(asyncapi_rust::MqttReponseTopic::Schema({
                             let schema = schemars::schema_for!(#r);
@@ -748,12 +748,29 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 } else {
                     quote! { None }
                 };
-                let session_expiry_interval = if let Some(s) = mqtt.session_expiry_interval {
-                    quote! {
-                        Some(asyncapi_rust::Schema::Any(serde_json::json!(#s)))
+
+                let session_expiry_interval = match &mqtt.session_expiry_interval {
+                    Some(crate::asyncapi_spec_attrs::MqttBindingNumValueMeta::Value(t)) => {
+                        quote! {
+                            Some(asyncapi_rust::MqttBindingNumValue::Value(
+                                #t
+                            ))
+                        }
                     }
-                } else {
-                    quote! { None }
+                    Some(crate::asyncapi_spec_attrs::MqttBindingNumValueMeta::Reference(r)) => {
+                        quote! {
+                            Some(asyncapi_rust::MqttBindingNumValue::Schema({
+                                let schema = schemars::schema_for!(#r);
+
+                                let schema_json = serde_json::to_value(&schema)
+                                    .expect("Failed to serialize schema");
+
+                                serde_json::from_value(schema_json)
+                                    .expect("Failed to deserialize schema")
+                            }))
+                        }
+                    }
+                    _ => quote! { None },
                 };
 
                 let keep_alive = if let Some(k) = mqtt.keep_alive {
@@ -762,10 +779,28 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     quote! { None }
                 };
 
-                let max_packet_size = if let Some(s) = &mqtt.maximum_packet_size {
-                    quote! { Some(#s) }
-                } else {
-                    quote! { None }
+                let max_packet_size = match &mqtt.maximum_packet_size {
+                    Some(crate::asyncapi_spec_attrs::MqttBindingNumValueMeta::Value(t)) => {
+                        quote! {
+                            Some(asyncapi_rust::MqttBindingNumValue::Value(
+                                #t
+                            ))
+                        }
+                    }
+                    Some(crate::asyncapi_spec_attrs::MqttBindingNumValueMeta::Reference(r)) => {
+                        quote! {
+                            Some(asyncapi_rust::MqttBindingNumValue::Schema({
+                                let schema = schemars::schema_for!(#r);
+
+                                let schema_json = serde_json::to_value(&schema)
+                                    .expect("Failed to serialize schema");
+
+                                serde_json::from_value(schema_json)
+                                    .expect("Failed to deserialize schema")
+                            }))
+                        }
+                    }
+                    _ => quote! { None },
                 };
 
                 quote! {
@@ -941,20 +976,16 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 };
 
                 let message_expiry = match &mqtt.message_expiry_interval {
-                    Some(crate::asyncapi_spec_attrs::MqttMessageExpiryIntervalMeta::Interval(
-                        t,
-                    )) => {
+                    Some(crate::asyncapi_spec_attrs::MqttBindingNumValueMeta::Value(t)) => {
                         quote! {
-                            Some(asyncapi_rust::MqttMessageExpiryInterval::Interval(
+                            Some(asyncapi_rust::MqttBindingNumValue::Value(
                                 #t
                             ))
                         }
                     }
-                    Some(crate::asyncapi_spec_attrs::MqttMessageExpiryIntervalMeta::Reference(
-                        r,
-                    )) => {
+                    Some(crate::asyncapi_spec_attrs::MqttBindingNumValueMeta::Reference(r)) => {
                         quote! {
-                            Some(asyncapi_rust::MqttMessageExpiryInterval::Schema({
+                            Some(asyncapi_rust::MqttBindingNumValue::Schema({
                                 let schema = schemars::schema_for!(#r);
 
                                 let schema_json = serde_json::to_value(&schema)

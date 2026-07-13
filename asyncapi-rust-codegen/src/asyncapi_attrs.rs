@@ -3,12 +3,12 @@
 use syn::{Attribute, Path};
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ResponseTopic {
+pub enum ResponseTopicMeta {
     Reference(Path),
     Uri(String),
 }
 
-impl Default for ResponseTopic {
+impl Default for ResponseTopicMeta {
     fn default() -> Self {
         Self::Uri(String::default())
     }
@@ -19,7 +19,7 @@ pub struct MqttMessageBindingsMeta {
     pub payload_format_indicator: Option<u8>,
     pub correlation_data: Option<Path>,
     pub content_type: Option<String>,
-    pub response_topic: Option<ResponseTopic>,
+    pub response_topic: Option<ResponseTopicMeta>,
     pub binding_version: Option<String>,
 }
 
@@ -37,13 +37,13 @@ pub struct AsyncApiMeta {
     pub mqtt: Option<MqttMessageBindingsMeta>,
 }
 
-fn parse_response_topic(expr: syn::Expr) -> Option<ResponseTopic> {
+fn parse_response_topic(expr: syn::Expr) -> Option<ResponseTopicMeta> {
     match expr {
         syn::Expr::Lit(expr_lit) => match expr_lit.lit {
-            syn::Lit::Str(s) => Some(ResponseTopic::Uri(s.value())),
+            syn::Lit::Str(s) => Some(ResponseTopicMeta::Uri(s.value())),
             _ => None,
         },
-        syn::Expr::Path(expr_path) => Some(ResponseTopic::Reference(expr_path.path)),
+        syn::Expr::Path(expr_path) => Some(ResponseTopicMeta::Reference(expr_path.path)),
         _ => None,
     }
 }
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(
             meta.mqtt,
             Some(MqttMessageBindingsMeta {
-                response_topic: Some(ResponseTopic::Uri("/a/b/d".to_string())),
+                response_topic: Some(ResponseTopicMeta::Uri("/a/b/d".to_string())),
                 payload_format_indicator: None,
                 content_type: None,
                 correlation_data: None,

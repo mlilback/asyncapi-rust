@@ -13,6 +13,18 @@ pub struct A {
     pub correlation_data: u8,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct MinMax {
+    #[schemars(range(min = 30, max = 1200))]
+    value: u32,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct Min {
+    #[schemars(range(min = 256))]
+    value: u32,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
 #[asyncapi(
     mqtt(
@@ -47,7 +59,17 @@ pub struct MqttMessage;
         ),
         keep_alive = 60,
         session_expiry_interval = 3600,
+        maximum_packet_size = 1200
         binding_version = "1.0"
+    )
+)]
+#[asyncapi_server(
+    name = "dev",
+    host = "dev.api.example.com",
+    protocol = "mqtt",
+    mqtt(
+        session_expiry_interval = MinMax,
+        maximum_packet_size = Min
     )
 )]
 #[asyncapi_channel(name = "test", address = "/test")]

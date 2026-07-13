@@ -215,6 +215,16 @@ pub struct MqttLastWill {
     pub retain: bool,
 }
 
+/// Represents mqtt binding properties which can be either a number or a json schema like sessionExpiryInterval or maximumPacketSize
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MqttBindingNumValue {
+    /// The value variant
+    Value(u32),
+    /// The schema variant
+    Schema(Schema),
+}
+
 /// Mqtt server binding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MqttServerBindings {
@@ -240,11 +250,11 @@ pub struct MqttServerBindings {
         skip_serializing_if = "Option::is_none",
         rename = "sessionExpiryInterval"
     )]
-    pub session_expiry_interval: Option<Schema>,
+    pub session_expiry_interval: Option<MqttBindingNumValue>,
 
     /// Number of bytes or a Schema Object representing the maximum packet size the client is willing to accept.
     #[serde(skip_serializing_if = "Option::is_none", rename = "maximumPacketSize")]
-    pub max_packet_size: Option<Schema>,
+    pub max_packet_size: Option<MqttBindingNumValue>,
 
     /// The version of this binding. If omitted, "latest" MUST be assumed.
     #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
@@ -614,16 +624,6 @@ pub struct OperationBindings {
     pub mqtt: Option<MqttOperationBindings>,
 }
 
-/// Interval in seconds or a Schema Object containing the definition of the lifetime of the message.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(untagged)]
-pub enum MqttMessageExpiryInterval {
-    /// Interval in seconds
-    Interval(u32),
-    /// Schema Object containing the definition of the lifetime of the message
-    Schema(Schema),
-}
-
 /// Mqtt operation bindings
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MqttOperationBindings {
@@ -641,7 +641,7 @@ pub struct MqttOperationBindings {
         skip_serializing_if = "Option::is_none",
         rename = "messageExpiryInterval"
     )]
-    pub message_expiry_interval: Option<MqttMessageExpiryInterval>,
+    pub message_expiry_interval: Option<MqttBindingNumValue>,
 
     /// The version of this binding. If omitted, "latest" MUST be assumed.
     #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
