@@ -349,14 +349,14 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
             let response_topic = match &mqtt.response_topic {
                 Some(crate::asyncapi_attrs::ResponseTopicMeta::Uri(t)) => {
                     quote! {
-                        Some(asyncapi_rust::MqttReponseTopic::Uri(
+                        Some(asyncapi_rust::MqttResponseTopic::Uri(
                             #t.to_string()
                         ))
                     }
                 }
                 Some(crate::asyncapi_attrs::ResponseTopicMeta::Reference(r)) => {
                     quote! {
-                        Some(asyncapi_rust::MqttReponseTopic::Schema({
+                        Some(asyncapi_rust::MqttResponseTopic::Schema({
                             let schema = schemars::schema_for!(#r);
 
                             let schema_json = serde_json::to_value(&schema)

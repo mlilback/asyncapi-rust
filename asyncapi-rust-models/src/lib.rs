@@ -540,7 +540,7 @@ pub struct MessageBindings {
 /// Mqtt response topic
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(untagged)]
-pub enum MqttReponseTopic {
+pub enum MqttResponseTopic {
     /// Topic Uri
     Uri(String),
     /// Schema for the the response topic
@@ -567,7 +567,7 @@ pub struct MqttMessageBindings {
 
     /// The topic (channel URI) for a response message.
     #[serde(skip_serializing_if = "Option::is_none", rename = "responseTopic")]
-    pub response_topic: Option<MqttReponseTopic>,
+    pub response_topic: Option<MqttResponseTopic>,
 
     /// The version of this binding. If omitted, "latest" MUST be assumed.
     #[serde(skip_serializing_if = "Option::is_none", rename = "bindingVersion")]
