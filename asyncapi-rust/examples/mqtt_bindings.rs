@@ -59,7 +59,7 @@ pub struct MqttMessage;
         ),
         keep_alive = 60,
         session_expiry_interval = 3600,
-        maximum_packet_size = 1200
+        maximum_packet_size = 1200,
         binding_version = "1.0"
     )
 )]
@@ -100,18 +100,18 @@ fn main() {
             if let Some(desc) = &server.description {
                 println!("    Description: {}", desc);
             }
-            println!("      bindings: {:?}", &server.bindings)
+            println!("      bindings: {:?}", server.bindings)
         }
         println!();
     }
 
-    // Display messages (automatically populated from ChatMessage and SystemMessage)
+    // Display messages (automatically populated from MqttMessage)
     if let Some(components) = &spec.components {
         if let Some(messages) = &components.messages {
             println!("Messages (automatically included from message types):");
             for (name, message) in messages {
                 println!("  - {}", name);
-                if let Some(mqtt) = &message.bindings.as_ref().unwrap().mqtt {
+                if let Some(mqtt) = message.bindings.as_ref().and_then(|b| b.mqtt.as_ref()) {
                     println!("    Mqtt Bindings: {:?}", mqtt);
                 }
             }
@@ -129,7 +129,10 @@ fn main() {
             };
             println!("  • {} ({})", name, action);
             println!("    Channel: {}", operation.channel.reference);
-            println!("  Mqtt: {:?}", &operation.bindings.as_ref().unwrap().mqtt);
+            println!(
+                "  Mqtt: {:?}",
+                operation.bindings.as_ref().and_then(|b| b.mqtt.as_ref())
+            );
         }
         println!();
     }

@@ -543,7 +543,7 @@ pub struct MessageBindings {
 pub enum MqttResponseTopic {
     /// Topic Uri
     Uri(String),
-    /// Schema for the the response topic
+    /// Schema for the response topic
     Schema(Schema),
 }
 
