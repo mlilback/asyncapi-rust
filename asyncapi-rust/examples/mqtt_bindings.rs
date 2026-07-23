@@ -2,11 +2,13 @@ use asyncapi_rust::{AsyncApi, ToAsyncApiMessage};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+// MQTT responseTopic is a topic string; model it as a string schema (a
+// transparent newtype) rather than an object so the emitted schema is faithful.
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ExampleResponseTopic {
-    #[schemars(regex(pattern = "response/client/([a-z1-9]+)"))]
-    pub response: String,
-}
+#[schemars(transparent)]
+pub struct ExampleResponseTopic(
+    #[schemars(regex(pattern = "^response/client/([a-z0-9]+)$"))] pub String,
+);
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct A {
