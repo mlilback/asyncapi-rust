@@ -12,6 +12,7 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 ## Table of Contents
 
 - [Features](#features)
+- [Migrating from 0.4.x](#migrating-from-04x)
 - [Migrating from 0.3.x](#migrating-from-03x)
 - [Migrating from 0.2.x](#migrating-from-02x)
 - [Quick Start](#quick-start)
@@ -40,6 +41,20 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 - 🎯 **Familiar**: Follows patterns from [`utoipa`](https://crates.io/crates/utoipa), [`serde`](https://serde.rs), and [`clap`](https://crates.io/crates/clap)
 - 🌐 **Framework agnostic**: Works with actix-ws, axum, or any serde-compatible types
 - 📦 **Binary protocols**: Support for mixed text/binary WebSocket messages (Arrow IPC, Protobuf, etc.)
+- 🔌 **Protocol bindings**: MQTT server, operation, and message bindings (more protocols planned)
+
+## Migrating from 0.4.x
+
+**New in 0.5.0:** protocol bindings. `Server`, `Operation`, and `Message` each gained a `bindings` field, and MQTT server/operation/message bindings can now be declared with `mqtt(...)` inside the `#[asyncapi_server(...)]`, `#[asyncapi_operation(...)]`, and `#[asyncapi(...)]` attributes. See [`examples/mqtt_bindings.rs`](asyncapi-rust/examples/mqtt_bindings.rs).
+
+The `bindings` field is `Option<_>` with `#[serde(default)]` and `Default`, so deserialization, `..Default::default()`, and read-only access compile unchanged. **If you construct `Server`, `Operation`, or `Message` with an explicit struct literal** (e.g. in tests or a custom spec builder), add the new field:
+
+```rust
+let server = asyncapi_rust::Server {
+    // ...existing fields...
+    bindings: None,
+};
+```
 
 ## Migrating from 0.3.x
 
@@ -248,6 +263,7 @@ See working examples in the `examples/` directory:
 - **`chat_api.rs`** - Complete AsyncAPI 3.0 specification with server, channels, and operations
 - **`message_integration.rs`** - Automatic message integration with `#[asyncapi_messages(...)]`
 - **`server_variables.rs`** - Server variables and channel parameters for dynamic paths
+- **`mqtt_bindings.rs`** - MQTT server, operation, and message protocol bindings
 - **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
 - **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
 - **`generate_spec_file.rs`** - Generating specification files
@@ -260,6 +276,7 @@ Run any example:
 cargo run --example simple
 cargo run --example message_integration
 cargo run --example server_variables
+cargo run --example mqtt_bindings
 ```
 
 ## Motivation
@@ -427,6 +444,8 @@ cargo asyncapi serve  # Start AsyncAPI UI viewer
 - [x] actix-ws integration
 - [x] axum integration
 - [x] Binary message support
+- [x] Protocol bindings (MQTT)
+- [ ] Additional protocol bindings (Kafka, AMQP, WebSocket, etc.)
 - [ ] Embedded AsyncAPI UI
 - [ ] Additional framework support (tonic/gRPC, Rocket, Warp)
 - [ ] Cargo plugin (`cargo-asyncapi`) for automated spec generation
