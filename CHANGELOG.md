@@ -1,3 +1,24 @@
+## [0.5.0] - 2026-07-24
+
+### ⚡ Features
+
+
+- Add AsyncAPI MQTT bindings for server, operation, and message (#12) ([#12](https://github.com/mlilback/asyncapi-rust/issues/12), [#11](https://github.com/mlilback/asyncapi-rust/issues/11), [#14](https://github.com/mlilback/asyncapi-rust/issues/14), [#15](https://github.com/mlilback/asyncapi-rust/issues/15))
+
+
+### 🐛 Bug Fixes
+
+
+- Surface malformed asyncapi/mqtt attribute errors as compile errors ([#14](https://github.com/mlilback/asyncapi-rust/issues/14))
+
+
+
+
+### New Contributors
+
+* @pureions made their first contribution in #12
+
+
 ## [0.4.0] - 2026-06-19
 
 ### 🐛 Bug Fixes
