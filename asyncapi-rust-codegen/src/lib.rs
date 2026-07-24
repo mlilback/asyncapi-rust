@@ -239,7 +239,10 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                     .unwrap_or_else(|| variant_ident_str.clone());
 
                 // Extract asyncapi metadata
-                let asyncapi_meta = extract_asyncapi_meta(&variant.attrs);
+                let asyncapi_meta = match extract_asyncapi_meta(&variant.attrs) {
+                    Ok(m) => m,
+                    Err(e) => return e.to_compile_error().into(),
+                };
 
                 // Message identity: explicit message_name override, else variant ident.
                 // We deliberately do NOT use the serde rename here — it may be empty,
@@ -265,7 +268,10 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
         }
         Data::Struct(_) => {
             // For structs, extract metadata from the struct itself
-            let asyncapi_meta = extract_asyncapi_meta(&input.attrs);
+            let asyncapi_meta = match extract_asyncapi_meta(&input.attrs) {
+                Ok(m) => m,
+                Err(e) => return e.to_compile_error().into(),
+            };
             let struct_name = name.to_string();
             let message_name = asyncapi_meta
                 .message_name
@@ -611,7 +617,10 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
     let name = &input.ident;
 
     // Extract asyncapi spec metadata
-    let spec_meta = extract_asyncapi_spec_meta(&input.attrs);
+    let spec_meta = match extract_asyncapi_spec_meta(&input.attrs) {
+        Ok(m) => m,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     // Validate required fields
     let title = match spec_meta.title {

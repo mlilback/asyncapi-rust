@@ -48,8 +48,12 @@ fn parse_response_topic(expr: syn::Expr) -> Option<ResponseTopicMeta> {
     }
 }
 
-/// Extract asyncapi metadata from `#[asyncapi(...)]` attributes
-pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
+/// Extract asyncapi metadata from `#[asyncapi(...)]` attributes.
+///
+/// Returns an error when an `#[asyncapi(...)]` attribute is malformed (e.g. a
+/// value of the wrong literal type) so the derive macro can surface it as a
+/// compile error rather than silently dropping the binding.
+pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> syn::Result<AsyncApiMeta> {
     let mut meta = AsyncApiMeta::default();
 
     for attr in attrs {
@@ -57,7 +61,7 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
             continue;
         }
 
-        let _ = attr.parse_nested_meta(|nested| {
+        attr.parse_nested_meta(|nested| {
             if nested.path.is_ident("summary") {
                 let value = nested.value()?;
                 let s: syn::LitStr = value.parse()?;
@@ -113,10 +117,10 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> AsyncApiMeta {
                 meta.mqtt = Some(binding);
             }
             Ok(())
-        });
+        })?;
     }
 
-    meta
+    Ok(meta)
 }
 
 #[cfg(test)]
@@ -130,7 +134,7 @@ mod tests {
             #[asyncapi(summary = "Send a message")]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert_eq!(meta.summary, Some("Send a message".to_string()));
         assert_eq!(meta.description, None);
     }
@@ -141,7 +145,7 @@ mod tests {
             #[asyncapi(summary = "Send message", description = "Sends a chat message to a room")]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert_eq!(meta.summary, Some("Send message".to_string()));
         assert_eq!(
             meta.description,
@@ -155,7 +159,7 @@ mod tests {
             #[asyncapi(mqtt(response_topic = "/a/b/d"))]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert_eq!(
             meta.mqtt,
             Some(MqttMessageBindingsMeta {
@@ -174,7 +178,7 @@ mod tests {
             #[asyncapi(content_type = "application/octet-stream")]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert_eq!(
             meta.content_type,
             Some("application/octet-stream".to_string())
@@ -187,7 +191,7 @@ mod tests {
             #[derive(Debug)]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert_eq!(meta.summary, None);
         assert_eq!(meta.description, None);
     }
@@ -198,7 +202,7 @@ mod tests {
             #[asyncapi(triggers_binary)]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert!(meta.triggers_binary);
         assert_eq!(meta.content_type, None);
     }
@@ -209,7 +213,7 @@ mod tests {
             #[asyncapi(title = "My Message")]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert_eq!(meta.title, Some("My Message".to_string()));
     }
 
@@ -219,7 +223,18 @@ mod tests {
             #[asyncapi(message_name = "CurrentEditorResponse")]
         }];
 
-        let meta = extract_asyncapi_meta(&attrs);
+        let meta = extract_asyncapi_meta(&attrs).unwrap();
         assert_eq!(meta.message_name, Some("CurrentEditorResponse".to_string()));
+    }
+
+    #[test]
+    fn test_malformed_mqtt_binding_errors() {
+        // payload_format_indicator expects an integer literal; a string is invalid
+        // and must surface as an error rather than being silently dropped.
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi(mqtt(payload_format_indicator = "not-an-int"))]
+        }];
+
+        assert!(extract_asyncapi_meta(&attrs).is_err());
     }
 }
