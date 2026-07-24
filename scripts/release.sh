@@ -150,7 +150,7 @@ read -p "$(echo -e ${YELLOW}Commit these changes? [y/N]:${NC} )" -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Rolling back changes..."
-    git checkout Cargo.toml asyncapi-rust/Cargo.toml Cargo.lock CHANGELOG.md
+    git checkout Cargo.toml asyncapi-rust/Cargo.toml CHANGELOG.md
     echo "Release cancelled"
     exit 1
 fi
@@ -158,7 +158,7 @@ fi
 # Commit
 echo ""
 echo "Committing changes..."
-git add Cargo.toml Cargo.lock asyncapi-rust/Cargo.toml CHANGELOG.md
+git add Cargo.toml asyncapi-rust/Cargo.toml CHANGELOG.md
 git commit -m "chore(release): prepare for v$SUGGESTED_VERSION"
 
 # Tag
