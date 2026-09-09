@@ -441,6 +441,94 @@ fn test_asyncapi_with_messages() {
     assert_eq!(system_status.summary, Some("System status".to_string()));
 }
 
+#[test]
+fn test_asyncapi_operation_with_messages() {
+    // Define message types for operations
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum ChatMessage {
+        #[serde(rename = "user.join")]
+        UserJoin { username: String, room: String },
+        #[serde(rename = "chat.message")]
+        ChatMessage { username: String, text: String },
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum SystemMessage {
+        #[serde(rename = "system.status")]
+        Status { status: String },
+    }
+
+    // Define API with operations that specify messages
+    #[allow(clippy::duplicated_attributes)]
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Chat API", version = "1.0.0")]
+    #[asyncapi_channel(name = "chat", address = "/ws/chat")]
+    #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", messages = [ChatMessage])]
+    #[asyncapi_operation(name = "receiveMessage", action = "receive", channel = "chat", messages = [ChatMessage, SystemMessage])]
+    #[asyncapi_messages(ChatMessage, SystemMessage)]
+    struct ChatApi;
+
+    let spec = ChatApi::asyncapi_spec();
+
+    println!("{}", serde_json::to_string_pretty(&spec).unwrap());
+
+    // Verify operations exist
+    let operations = spec.operations.expect("Should have operations");
+    assert_eq!(operations.len(), 2);
+
+    // Verify sendMessage operation has messages
+    let send_op = operations
+        .get("sendMessage")
+        .expect("Should have sendMessage operation");
+    assert!(send_op.messages.is_some());
+    let send_messages = send_op.messages.as_ref().unwrap();
+    assert_eq!(send_messages.len(), 2); // ChatMessage has 2 variants
+
+    // Verify receiveMessage operation has messages
+    let receive_op = operations
+        .get("receiveMessage")
+        .expect("Should have receiveMessage operation");
+    assert!(receive_op.messages.is_some());
+    let receive_messages = receive_op.messages.as_ref().unwrap();
+    assert_eq!(receive_messages.len(), 3); // ChatMessage (2 variants) + SystemMessage (1 variant)
+
+    // Verify operation message references point to channel messages (not components directly)
+    match &send_messages[0] {
+        asyncapi_rust::MessageRef::Reference { reference } => {
+            println!("{}", reference);
+            assert!(
+                reference == "#/channels/chat/messages/UserJoin"
+                    || reference == "#/channels/chat/messages/ChatMessage"
+            );
+        }
+        _ => panic!("Expected message reference"),
+    }
+
+    // Verify channels exist and have messages
+    let channels = spec.channels.expect("Should have channels");
+    assert_eq!(channels.len(), 1);
+
+    let chat_channel = channels.get("chat").expect("Should have chat channel");
+    assert!(chat_channel.messages.is_some());
+    let channel_messages = chat_channel.messages.as_ref().unwrap();
+    assert_eq!(channel_messages.len(), 3); // All unique messages from both operations
+
+    // Verify channel messages reference components directly
+    assert!(channel_messages.contains_key("UserJoin"));
+    assert!(channel_messages.contains_key("ChatMessage"));
+    assert!(channel_messages.contains_key("Status"));
+
+    // Verify channel messages reference components (not other channels)
+    match channel_messages.get("UserJoin").unwrap() {
+        asyncapi_rust::MessageRef::Reference { reference } => {
+            assert_eq!(reference, "#/components/messages/UserJoin");
+        }
+        _ => panic!("Expected message reference"),
+    }
+}
+
 // Regression test for issue #4: ToAsyncApiMessage panics on enums with serde_json::Value fields
 #[test]
 fn test_enum_with_json_value_fields() {

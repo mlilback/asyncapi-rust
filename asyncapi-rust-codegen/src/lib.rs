@@ -75,13 +75,16 @@
 //! #[asyncapi_operation(
 //!     name = "sendMessage",
 //!     action = "send",
-//!     channel = "chat"
+//!     channel = "chat",
+//!     messages = [ChatMessage]
 //! )]
 //! #[asyncapi_operation(
 //!     name = "receiveMessage",
 //!     action = "receive",
-//!     channel = "chat"
+//!     channel = "chat",
+//!     messages = [ChatMessage, SystemMessage]
 //! )]
+//! #[asyncapi_messages(ChatMessage, SystemMessage)]
 //! struct ChatApi;
 //!
 //! // Generated method:
@@ -131,6 +134,12 @@
 //! - `name = "..."` - Operation identifier (required)
 //! - `action = "send"|"receive"` - Operation type (required)
 //! - `channel = "..."` - Channel reference (required)
+//! - `messages = [Type1, Type2, ...]` - Message types available for this operation (optional)
+//!
+//! When the `messages` parameter is specified on operations, those messages are automatically
+//! added to the channel that the operation references. Operation messages reference the channel's
+//! messages (e.g., `#/channels/{channel}/messages/{message}`), while channel messages reference
+//! the components section (e.g., `#/components/messages/{message}`), following AsyncAPI 3.0 spec.
 //!
 //! ## Integration with serde
 //!
@@ -503,6 +512,8 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                     use schemars::schema_for;
 
                     let schema = schema_for!(Self);
+
+                    // Convert schemars RootSchema to JSON
                     let schema_json = serde_json::to_value(&schema)
                         .expect("Failed to serialize schema");
 
@@ -922,12 +933,54 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 }
             };
 
+            // Collect messages from all operations that reference this channel
+            let channel_name_str = name.as_str();
+            let operations_for_channel: Vec<_> = spec_meta
+                .operations
+                .iter()
+                .filter(|op| op.channel == channel_name_str)
+                .collect();
+
+            let messages_field = if operations_for_channel.is_empty()
+                || operations_for_channel
+                    .iter()
+                    .all(|op| op.messages.is_empty())
+            {
+                quote! { None }
+            } else {
+                let message_calls: Vec<_> = operations_for_channel
+                    .iter()
+                    .flat_map(|op| &op.messages) // Deduplicate
+                    .map(|type_name| {
+                        quote! {
+                            // Call asyncapi_message_names() for this type and add references
+                            for msg_name in #type_name::asyncapi_message_names() {
+                                channel_messages.insert(
+                                    msg_name.to_string(),
+                                    asyncapi_rust::MessageRef::Reference {
+                                        reference: format!("#/components/messages/{}", msg_name),
+                                    }
+                                );
+                            }
+                        }
+                    })
+                    .collect();
+
+                quote! {
+                    {
+                        let mut channel_messages = asyncapi_rust::indexmap::IndexMap::new();
+                        #(#message_calls)*
+                        Some(channel_messages)
+                    }
+                }
+            };
+
             quote! {
                 channels.insert(
                     #name.to_string(),
                     asyncapi_rust::Channel {
                         address: #address,
-                        messages: None,
+                        messages: #messages_field,
                         parameters: #parameters,
                     }
                 );
@@ -952,6 +1005,22 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
             let channel_ref = &operation.channel;
             let action = &operation.action;
 
+            // Validate that the operation references a declared channel
+            if !spec_meta
+                .channels
+                .iter()
+                .any(|channel| channel.name == *channel_ref)
+            {
+                return syn::Error::new_spanned(
+                    channel_ref,
+                    format!(
+                        "Operation '{}' references unknown channel '{}'",
+                        name, channel_ref
+                    ),
+                )
+                .to_compile_error();
+            }
+
             // Convert action string to OperationAction enum
             let action_enum = if action == "send" {
                 quote! { asyncapi_rust::OperationAction::Send }
@@ -963,6 +1032,44 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     format!("Invalid action '{}', must be 'send' or 'receive'", action),
                 )
                 .to_compile_error();
+            };
+
+            // Generate messages references if any messages are specified
+            let messages_field = if operation.messages.is_empty() {
+                quote! { None }
+            } else {
+                let message_calls: Vec<_> = operation
+                    .messages
+                    .iter()
+                    .map(|type_name| {
+                        quote! {
+                            for msg_name in #type_name::asyncapi_message_names() {
+                                message_refs
+                                    .entry(msg_name.to_string())
+                                    .or_insert_with(|| {
+                                        asyncapi_rust::MessageRef::Reference {
+                                            reference: format!(
+                                                "#/channels/{}/messages/{}",
+                                                #channel_ref,
+                                                msg_name
+                                            ),
+                                        }
+                                    });
+                            }
+                        }
+                    })
+                    .collect();
+
+                quote! {
+                    {
+                        let mut message_refs =
+                            asyncapi_rust::indexmap::IndexMap::new();
+
+                        #(#message_calls)*
+
+                        Some(message_refs.into_values().collect())
+                    }
+                }
             };
 
             let bindings = if let Some(mqtt) = &operation.mqtt {
@@ -1030,7 +1137,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         channel: asyncapi_rust::ChannelRef {
                             reference: format!("#/channels/{}", #channel_ref),
                         },
-                        messages: None,
+                        messages: #messages_field,
                         bindings: #bindings
                     }
                 );
@@ -1047,10 +1154,22 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
     };
 
     // Generate components with messages and hoisted shared schemas
-    let components_code = if spec_meta.message_types.is_empty() {
+    let mut all_message_types = spec_meta.message_types.clone();
+
+    for type_name in spec_meta
+        .operations
+        .iter()
+        .flat_map(|operation| operation.messages.iter())
+    {
+        if !all_message_types.contains(type_name) {
+            all_message_types.push(type_name.clone());
+        }
+    }
+
+    let components_code = if all_message_types.is_empty() {
         quote! { None }
     } else {
-        let type_calls = spec_meta.message_types.iter().map(|type_name| {
+        let type_calls = all_message_types.iter().map(|type_name| {
             quote! {
                 for msg in #type_name::asyncapi_messages() {
                     if let Some(ref name) = msg.name {

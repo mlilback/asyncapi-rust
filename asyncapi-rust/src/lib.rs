@@ -42,8 +42,9 @@
 //! #[asyncapi(title = "Chat API", version = "1.0.0")]
 //! #[asyncapi_server(name = "production", host = "api.example.com", protocol = "wss")]
 //! #[asyncapi_channel(name = "chat", address = "/ws/chat")]
-//! #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat")]
-//! #[asyncapi_operation(name = "receiveMessage", action = "receive", channel = "chat")]
+//! #[asyncapi_operation(name = "sendMessage", action = "send", channel = "chat", messages = [ChatMessage])]
+//! #[asyncapi_operation(name = "receiveMessage", action = "receive", channel = "chat", messages = [ChatMessage])]
+//! #[asyncapi_messages(ChatMessage)]
 //! struct ChatApi;
 //!
 //! fn main() {
@@ -76,7 +77,13 @@
 //! - `#[asyncapi(...)]` - Basic info (title, version, description)
 //! - `#[asyncapi_server(...)]` - Server definitions
 //! - `#[asyncapi_channel(...)]` - Channel definitions
-//! - `#[asyncapi_operation(...)]` - Operation definitions
+//! - `#[asyncapi_operation(...)]` - Operation definitions (with optional `messages` parameter)
+//! - `#[asyncapi_messages(...)]` - Include message types in components
+//!
+//! When you specify messages in operations, they are automatically added to the channel
+//! that the operation references. Operations reference channel messages
+//! (`#/channels/{channel}/messages/{message}`), while channels reference components
+//! (`#/components/messages/{message}`), following AsyncAPI 3.0 specification.
 //!
 //! ## Framework Integration
 //!
