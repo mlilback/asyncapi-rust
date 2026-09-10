@@ -2,6 +2,50 @@
 
 use syn::{Attribute, LitStr, Path};
 
+/// Convert a parsed type into the plain type path the message lists require.
+///
+/// Message lists are turned into `#path::asyncapi_message_names()` calls, which
+/// only works for a generic-free path. Parsing the list as `Type` rather than
+/// `Path` lets us reject everything else with a diagnostic that names the
+/// offending type, instead of letting a generic argument fail deep inside
+/// `syn`'s path parser as "comparison operators cannot be chained" followed by
+/// "proc-macro derive produced unparsable tokens" (#23).
+fn message_type_path(ty: syn::Type, attr_name: &str) -> syn::Result<Path> {
+    let syn::Type::Path(type_path) = &ty else {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            format!(
+                "`{attr_name}` expects a type path, e.g. `MyMessage` or `crate::msgs::MyMessage`"
+            ),
+        ));
+    };
+
+    if type_path.qself.is_some() {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            format!("`{attr_name}` does not support qualified paths; use a plain type path"),
+        ));
+    }
+
+    if let Some(segment) = type_path
+        .path
+        .segments
+        .iter()
+        .find(|segment| !segment.arguments.is_none())
+    {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            format!(
+                "`{attr_name}` does not support generic types, but `{}` has generic arguments. \
+                 Use a concrete type alias instead, e.g. `type MyMessage = Wrapper<Inner>;`",
+                segment.ident
+            ),
+        ));
+    }
+
+    Ok(type_path.path.clone())
+}
+
 /// AsyncAPI spec metadata extracted from attributes
 #[derive(Debug, Default, Clone)]
 pub struct AsyncApiSpecMeta {
@@ -170,8 +214,11 @@ fn extract_message_types(attr: &Attribute) -> syn::Result<Vec<Path>> {
     use syn::punctuated::Punctuated;
 
     // Parse comma-separated list of type paths (e.g., super::messages::Operation, MyType)
-    let types = attr.parse_args_with(Punctuated::<Path, Token![,]>::parse_terminated)?;
-    Ok(types.into_iter().collect())
+    let types = attr.parse_args_with(Punctuated::<syn::Type, Token![,]>::parse_terminated)?;
+    types
+        .into_iter()
+        .map(|ty| message_type_path(ty, "asyncapi_messages"))
+        .collect()
 }
 
 /// Extract server metadata from `#[asyncapi_server(...)]` attribute
@@ -549,9 +596,12 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
             let _ = nested.value()?; // Parse the equals sign and prepare for value parsing
             let content;
             syn::bracketed!(content in nested.input);
-            let types: Punctuated<Path, Token![,]> =
+            let types: Punctuated<syn::Type, Token![,]> =
                 content.parse_terminated(|stream| stream.parse(), Token![,])?;
-            messages = types.into_iter().collect();
+            messages = types
+                .into_iter()
+                .map(|ty| message_type_path(ty, "messages"))
+                .collect::<syn::Result<Vec<_>>>()?;
         } else if nested.path.is_ident("mqtt") {
             mqtt = extract_mqtt_operation_bindings(&nested)?;
         }
@@ -706,6 +756,81 @@ mod tests {
         assert_eq!(meta.operations[0].name, "sendMessage");
         assert_eq!(meta.operations[0].action, "send");
         assert_eq!(meta.operations[0].channel, "chat");
+    }
+
+    #[test]
+    fn test_operation_messages_accepts_qualified_paths() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "sendMessage",
+                action = "send",
+                channel = "chat",
+                messages = [Plain, crate::msgs::Nested]
+            )]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs).unwrap();
+        let messages = &meta.operations[0].messages;
+        assert_eq!(messages.len(), 2);
+        assert_eq!(
+            quote!(#(#messages),*).to_string(),
+            "Plain , crate :: msgs :: Nested"
+        );
+    }
+
+    #[test]
+    fn test_operation_messages_rejects_generic_types() {
+        // #23: a generic type used to fail as "comparison operators cannot be
+        // chained" plus "proc-macro derive produced unparsable tokens".
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "sendMessage",
+                action = "send",
+                channel = "chat",
+                messages = [Option<Msg>]
+            )]
+        }];
+
+        let err = extract_asyncapi_spec_meta(&attrs).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("does not support generic types"), "got: {msg}");
+        assert!(
+            msg.contains("Option"),
+            "error should name the type; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_asyncapi_messages_rejects_generic_types() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_messages(Vec<Msg>)]
+        }];
+
+        let err = extract_asyncapi_spec_meta(&attrs).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("does not support generic types"), "got: {msg}");
+        assert!(
+            msg.contains("Vec"),
+            "error should name the type; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_operation_messages_rejects_non_path_types() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "sendMessage",
+                action = "send",
+                channel = "chat",
+                messages = [&'static str]
+            )]
+        }];
+
+        let err = extract_asyncapi_spec_meta(&attrs).unwrap_err();
+        assert!(
+            err.to_string().contains("expects a type path"),
+            "got: {err}"
+        );
     }
 
     #[test]
