@@ -1106,3 +1106,85 @@ fn test_adjacently_tagged_enum() {
         "discriminant 'data' must appear in Data payload schema"
     );
 }
+#[test]
+fn test_newtype_variant_keeps_tag_discriminant() {
+    // #18: an internally-tagged newtype variant is emitted by schemars as a
+    // $ref plus sibling properties carrying the tag. The untagged `Schema`
+    // enum used to match `Reference` first and drop those siblings, so the
+    // published payload schema no longer described what serde emits.
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    pub struct JoinPayload {
+        pub username: String,
+        pub room: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum Mixed {
+        #[serde(rename = "chat")]
+        Chat { text: String },
+        #[serde(rename = "user.join")]
+        UserJoin(JoinPayload),
+    }
+
+    let messages = Mixed::asyncapi_messages();
+    let join = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("UserJoin"))
+        .expect("UserJoin message");
+
+    let payload = serde_json::to_value(&join.payload).unwrap();
+
+    // The discriminant must survive...
+    assert_eq!(
+        payload["properties"]["type"]["const"], "user.join",
+        "newtype variant lost its tag discriminant: {payload}"
+    );
+    assert_eq!(payload["required"][0], "type");
+    // ...alongside the reference to the inner type's schema.
+    assert_eq!(payload["$ref"], "#/components/schemas/JoinPayload");
+
+    // The struct-like variant is unaffected.
+    let chat = messages
+        .iter()
+        .find(|m| m.name.as_deref() == Some("Chat"))
+        .expect("Chat message");
+    let chat_payload = serde_json::to_value(&chat.payload).unwrap();
+    assert_eq!(chat_payload["properties"]["type"]["const"], "chat");
+
+    // And the schema still describes the value serde actually produces.
+    let wire = serde_json::to_value(Mixed::UserJoin(JoinPayload {
+        username: "ada".to_string(),
+        room: "lounge".to_string(),
+    }))
+    .unwrap();
+    assert_eq!(wire["type"], "user.join");
+}
+
+#[test]
+fn test_bare_ref_still_deserializes_as_reference() {
+    use asyncapi_rust::Schema;
+
+    // The narrowed impl must still recognise a lone $ref.
+    let bare: Schema =
+        serde_json::from_value(serde_json::json!({"$ref": "#/components/schemas/Foo"})).unwrap();
+    assert!(
+        matches!(bare, Schema::Reference { ref reference } if reference == "#/components/schemas/Foo"),
+        "bare $ref should be Schema::Reference, got {bare:?}"
+    );
+    // Round-trips unchanged.
+    assert_eq!(
+        serde_json::to_value(&bare).unwrap(),
+        serde_json::json!({"$ref": "#/components/schemas/Foo"})
+    );
+
+    // A $ref with siblings keeps everything.
+    let with_siblings: Schema = serde_json::from_value(serde_json::json!({
+        "$ref": "#/components/schemas/Foo",
+        "description": "annotated reference"
+    }))
+    .unwrap();
+    let round_tripped = serde_json::to_value(&with_siblings).unwrap();
+    assert_eq!(round_tripped["$ref"], "#/components/schemas/Foo");
+    assert_eq!(round_tripped["description"], "annotated reference");
+}

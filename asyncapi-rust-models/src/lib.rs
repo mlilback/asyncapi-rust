@@ -721,13 +721,16 @@ pub struct Components {
 ///     additional: IndexMap::new(),
 /// }));
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum Schema {
     /// Reference to another schema ($ref)
     ///
     /// Points to a reusable schema definition in the components section.
     /// Format: "#/components/schemas/{schemaName}"
+    ///
+    /// Only a lone `$ref` deserializes into this variant — see the hand-written
+    /// [`Deserialize`] impl below for why.
     Reference {
         /// $ref path
         #[serde(rename = "$ref")]
@@ -744,6 +747,47 @@ pub enum Schema {
     /// structural information. `schemars` emits these for open-ended types such
     /// as `serde_json::Value`.
     Any(serde_json::Value),
+}
+
+/// Hand-written so that `$ref` with siblings is not mistaken for a bare reference.
+///
+/// A derived `untagged` impl tries `Reference` first and, because serde ignores
+/// unknown fields by default, matches *any* object containing a `$ref` — throwing
+/// away every sibling keyword. JSON Schema 2020-12 permits those siblings, and
+/// `schemars` depends on them: an internally-tagged newtype enum variant is
+/// emitted as a `$ref` to the inner type plus the `properties`/`required` that
+/// carry the tag discriminant. Under the derived impl the discriminant silently
+/// disappeared from the generated payload, so the published schema rejected
+/// messages that serde itself produces (#18).
+///
+/// Only an object whose sole key is `$ref` becomes [`Schema::Reference`];
+/// anything else falls through to [`Schema::Object`], whose flattened
+/// `additional` map preserves the `$ref` alongside the rest.
+impl<'de> Deserialize<'de> for Schema {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        let Some(object) = value.as_object() else {
+            // Boolean schemas (`true`/`false`) and other non-objects.
+            return Ok(Schema::Any(value));
+        };
+
+        if object.len() == 1
+            && let Some(reference) = object.get("$ref").and_then(|r| r.as_str())
+        {
+            return Ok(Schema::Reference {
+                reference: reference.to_string(),
+            });
+        }
+
+        match serde_json::from_value::<SchemaObject>(value.clone()) {
+            Ok(schema_object) => Ok(Schema::Object(Box::new(schema_object))),
+            Err(_) => Ok(Schema::Any(value)),
+        }
+    }
 }
 
 /// Schema object with all JSON Schema properties
