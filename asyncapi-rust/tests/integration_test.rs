@@ -1188,3 +1188,66 @@ fn test_bare_ref_still_deserializes_as_reference() {
     assert_eq!(round_tripped["$ref"], "#/components/schemas/Foo");
     assert_eq!(round_tripped["description"], "annotated reference");
 }
+
+#[test]
+fn test_channel_and_operation_descriptions_are_emitted() {
+    // Regression from #24: `description` on #[asyncapi_channel] and
+    // #[asyncapi_operation] was parsed into the meta structs and then dropped,
+    // because neither model carried a description field.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum DescMsg {
+        Echo { text: String },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Desc API", version = "1.0.0")]
+    #[asyncapi_channel(name = "chat", address = "/chat", description = "The chat channel")]
+    #[asyncapi_operation(
+        name = "sendChat",
+        action = "send",
+        channel = "chat",
+        description = "Send a chat message",
+        messages = [DescMsg]
+    )]
+    pub struct DescApi;
+
+    let spec = DescApi::asyncapi_spec();
+
+    let channel = spec.channels.as_ref().unwrap().get("chat").unwrap();
+    assert_eq!(channel.description.as_deref(), Some("The chat channel"));
+
+    let operation = spec.operations.as_ref().unwrap().get("sendChat").unwrap();
+    assert_eq!(
+        operation.description.as_deref(),
+        Some("Send a chat message")
+    );
+
+    // And they must survive serialization under the spec-mandated key.
+    let json = serde_json::to_value(&spec).unwrap();
+    assert_eq!(json["channels"]["chat"]["description"], "The chat channel");
+    assert_eq!(
+        json["operations"]["sendChat"]["description"],
+        "Send a chat message"
+    );
+}
+
+#[test]
+fn test_descriptions_omitted_when_absent() {
+    // description is optional: no key at all rather than a null.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum NoDescMsg {
+        Ping { n: u32 },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "No Desc API", version = "1.0.0")]
+    #[asyncapi_channel(name = "plain", address = "/plain")]
+    #[asyncapi_operation(name = "sendPlain", action = "send", channel = "plain", messages = [NoDescMsg])]
+    pub struct NoDescApi;
+
+    let json = serde_json::to_value(NoDescApi::asyncapi_spec()).unwrap();
+    assert!(json["channels"]["plain"].get("description").is_none());
+    assert!(json["operations"]["sendPlain"].get("description").is_none());
+}

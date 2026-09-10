@@ -330,9 +330,10 @@ pub struct ServerVariable {
 ///     address: Some("/ws/chat/{userId}".to_string()),
 ///     messages: None,
 ///     parameters: Some(parameters),
+///     ..Default::default()
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Channel {
     /// Channel address/path
     ///
@@ -354,6 +355,12 @@ pub struct Channel {
     /// A map of parameter names to their schema definitions for variables used in the address
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<IndexMap<String, Parameter>>,
+
+    /// Human-readable description of this channel
+    ///
+    /// Explains what the channel is for. CommonMark syntax may be used for rich text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Channel parameter definition
@@ -614,6 +621,12 @@ pub struct Operation {
     /// Protocol specific bindings
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bindings: Option<OperationBindings>,
+
+    /// Human-readable description of this operation
+    ///
+    /// Explains what the operation does. CommonMark syntax may be used for rich text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Protocol specific operation bindings

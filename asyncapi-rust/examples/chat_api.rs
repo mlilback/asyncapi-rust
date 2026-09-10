@@ -144,6 +144,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
             address: Some("/ws/chat".to_string()),
             messages: None, // Messages defined in components
             parameters: None,
+            description: Some("Main chat channel".to_string()),
         },
     );
 
@@ -170,6 +171,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
                     .collect(),
             ),
             bindings: None,
+            ..Default::default()
         },
     );
 
@@ -193,6 +195,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
                     .collect(),
             ),
             bindings: None,
+            ..Default::default()
         },
     );
 

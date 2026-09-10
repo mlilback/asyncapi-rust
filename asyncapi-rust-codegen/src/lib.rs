@@ -126,6 +126,7 @@
 //!
 //! - `name = "..."` - Channel identifier (required)
 //! - `address = "..."` - Channel path/address (optional)
+//! - `description = "..."` - Channel description (optional)
 //!
 //! ### `#[asyncapi_operation(...)]`
 //!
@@ -134,6 +135,7 @@
 //! - `name = "..."` - Operation identifier (required)
 //! - `action = "send"|"receive"` - Operation type (required)
 //! - `channel = "..."` - Channel reference (required)
+//! - `description = "..."` - Operation description (optional)
 //! - `messages = [Type1, Type2, ...]` - Message types available for this operation (optional)
 //!
 //! When the `messages` parameter is specified on operations, those messages are automatically
@@ -875,6 +877,11 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
             } else {
                 quote! { None }
             };
+            let channel_description = if let Some(d) = &channel.description {
+                quote! { Some(#d.to_string()) }
+            } else {
+                quote! { None }
+            };
 
             // Generate channel parameters
             let parameters = if channel.parameters.is_empty() {
@@ -982,6 +989,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         address: #address,
                         messages: #messages_field,
                         parameters: #parameters,
+                        description: #channel_description,
                     }
                 );
             }
@@ -1020,6 +1028,12 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 )
                 .to_compile_error();
             }
+
+            let operation_description = if let Some(d) = &operation.description {
+                quote! { Some(#d.to_string()) }
+            } else {
+                quote! { None }
+            };
 
             // Convert action string to OperationAction enum
             let action_enum = if action == "send" {
@@ -1138,7 +1152,8 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                             reference: format!("#/channels/{}", #channel_ref),
                         },
                         messages: #messages_field,
-                        bindings: #bindings
+                        bindings: #bindings,
+                        description: #operation_description,
                     }
                 );
             }
