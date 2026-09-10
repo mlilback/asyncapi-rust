@@ -102,6 +102,7 @@
 //! - `title = "..."` - Human-readable title (defaults to message name)
 //! - `content_type = "..."` - Content type (defaults to "application/json")
 //! - `triggers_binary` - Flag for binary messages (sets content_type to "application/octet-stream")
+//! - `tags = ["a", "b"]` - Tag names declared with `#[asyncapi_tag(...)]` on the API struct
 //!
 //! ### `#[asyncapi(...)]` on API specs
 //!
@@ -110,6 +111,19 @@
 //! - `title = "..."` - API title (required)
 //! - `version = "..."` - API version (required)
 //! - `description = "..."` - API description (optional)
+//! - `tags = ["a", "b"]` - Tag names to attach to `info`
+//!
+//! ### `#[asyncapi_tag(...)]`
+//!
+//! Declare a reusable tag; each becomes one entry in `components.tags`:
+//!
+//! - `name = "..."` - Tag name (required)
+//! - `description = "..."` - Tag description (optional)
+//!
+//! Tags are referenced by name from `#[asyncapi(...)]`, `#[asyncapi_server(...)]`,
+//! `#[asyncapi_channel(...)]`, `#[asyncapi_operation(...)]`, and message-level
+//! `#[asyncapi(...)]` via `tags = [...]`. Referencing a name that was never declared
+//! is a compile error.
 //!
 //! ### `#[asyncapi_server(...)]`
 //!
@@ -119,6 +133,7 @@
 //! - `host = "..."` - Server host/URL (required)
 //! - `protocol = "..."` - Protocol (e.g., "wss", "ws", "grpc") (required)
 //! - `description = "..."` - Server description (optional)
+//! - `tags = ["a", "b"]` - Tag names for this server (optional)
 //!
 //! ### `#[asyncapi_channel(...)]`
 //!
@@ -127,6 +142,7 @@
 //! - `name = "..."` - Channel identifier (required)
 //! - `address = "..."` - Channel path/address (optional)
 //! - `description = "..."` - Channel description (optional)
+//! - `tags = ["a", "b"]` - Tag names for this channel (optional)
 //!
 //! ### `#[asyncapi_operation(...)]`
 //!
@@ -138,6 +154,7 @@
 //! - `description = "..."` - Operation description (optional)
 //! - `messages = [Type1, Type2, ...]` - Message types available for this operation (optional)
 //! - `reply(...)` - Reply information for request/reply operations (optional)
+//! - `tags = ["a", "b"]` - Tag names for this operation (optional)
 //!
 //! ### `reply(...)` inside `#[asyncapi_operation(...)]`
 //!
@@ -262,6 +279,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
         content_type: Option<String>,
         triggers_binary: bool,
         mqtt: Option<crate::asyncapi_attrs::MqttMessageBindingsMeta>,
+        tags: Vec<String>,
     }
 
     // Parse enum variants or struct
@@ -300,6 +318,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                     content_type: asyncapi_meta.content_type,
                     triggers_binary: asyncapi_meta.triggers_binary,
                     mqtt: asyncapi_meta.mqtt,
+                    tags: asyncapi_meta.tags,
                 });
             }
 
@@ -326,6 +345,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                 content_type: asyncapi_meta.content_type,
                 triggers_binary: asyncapi_meta.triggers_binary,
                 mqtt: asyncapi_meta.mqtt,
+                tags: asyncapi_meta.tags,
             }]
         }
         Data::Union(_) => {
@@ -371,6 +391,24 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
             quote! { Some("application/octet-stream".to_string()) }
         } else {
             quote! { Some("application/json".to_string()) }
+        }
+    });
+
+    // Message tags reference `components.tags` by name. This derive can't see
+    // the API struct's `#[asyncapi_tag(...)]` declarations, so the names are
+    // emitted as-is; the `AsyncApi` derive is where declaration is enforced.
+    let message_tags = messages.iter().map(|m| {
+        if m.tags.is_empty() {
+            quote! { None }
+        } else {
+            let names = &m.tags;
+            quote! {
+                Some(vec![#(
+                    asyncapi_rust::TagRef::Reference {
+                        reference: format!("#/components/tags/{}", #names),
+                    }
+                ),*])
+            }
         }
     });
 
@@ -592,6 +630,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                     let descriptions: &[Option<String>] = &[#(#message_descriptions),*];
                     let content_types: &[Option<String>] = &[#(#message_content_types),*];
                     let bindings: &[Option<asyncapi_rust::MessageBindings>] = &[#(#message_mqtt_bindings),*];
+                    let tags: &[Option<Vec<asyncapi_rust::TagRef>>] = &[#(#message_tags),*];
 
                     let mut messages = Vec::with_capacity(names.len());
                     for i in 0..names.len() {
@@ -616,7 +655,8 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                             description: descriptions[i].clone(),
                             content_type: content_types[i].clone(),
                             payload,
-                            bindings: bindings[i].clone()
+                            bindings: bindings[i].clone(),
+                            tags: tags[i].clone(),
                         });
                     }
                     messages
@@ -650,7 +690,8 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
         asyncapi_server,
         asyncapi_channel,
         asyncapi_operation,
-        asyncapi_messages
+        asyncapi_messages,
+        asyncapi_tag
     )
 )]
 pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
@@ -692,6 +733,47 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
         quote! { Some(#desc.to_string()) }
     } else {
         quote! { None }
+    };
+
+    // Tag references are validated against the `#[asyncapi_tag(...)]`
+    // declarations, so a typo is a compile error rather than a `$ref` into a
+    // components section that never gains the entry.
+    let declared_tags: Vec<&str> = spec_meta
+        .tag_defs
+        .iter()
+        .map(|tag| tag.name.as_str())
+        .collect();
+
+    let tag_refs = |names: &[String], site: &str| -> Result<proc_macro2::TokenStream, syn::Error> {
+        if names.is_empty() {
+            return Ok(quote! { None });
+        }
+        let entries = names
+            .iter()
+            .map(|name| {
+                if !declared_tags.contains(&name.as_str()) {
+                    return Err(syn::Error::new(
+                        proc_macro2::Span::call_site(),
+                        format!(
+                            "unknown tag \"{name}\" on {site}; declare it with \
+                             #[asyncapi_tag(name = \"{name}\", ...)]"
+                        ),
+                    ));
+                }
+                Ok(quote! {
+                    asyncapi_rust::TagRef::Reference {
+                        reference: format!("#/components/tags/{}", #name),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(quote! { Some(vec![#(#entries),*]) })
+    };
+
+    let info_tags = match tag_refs(&spec_meta.tags, "the API") {
+        Ok(tokens) => tokens,
+        Err(err) => return err.to_compile_error().into(),
     };
 
     // Generate servers
@@ -870,6 +952,11 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 quote! { None }
             };
 
+            let server_tags = match tag_refs(&server.tags, &format!("server '{}'", name)) {
+                Ok(tokens) => tokens,
+                Err(err) => return err.to_compile_error(),
+            };
+
             quote! {
                 servers.insert(
                     #name.to_string(),
@@ -879,7 +966,8 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         pathname: #pathname,
                         description: #desc,
                         variables: #variables,
-                        bindings: #bindings
+                        bindings: #bindings,
+                        tags: #server_tags,
                     }
                 );
             }
@@ -1021,6 +1109,11 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 }
             };
 
+            let channel_tags = match tag_refs(&channel.tags, &format!("channel '{}'", name)) {
+                Ok(tokens) => tokens,
+                Err(err) => return err.to_compile_error(),
+            };
+
             quote! {
                 channels.insert(
                     #name.to_string(),
@@ -1029,6 +1122,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         messages: #messages_field,
                         parameters: #parameters,
                         description: #channel_description,
+                        tags: #channel_tags,
                     }
                 );
             }
@@ -1072,6 +1166,11 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 quote! { Some(#d.to_string()) }
             } else {
                 quote! { None }
+            };
+
+            let operation_tags = match tag_refs(&operation.tags, &format!("operation '{}'", name)) {
+                Ok(tokens) => tokens,
+                Err(err) => return err.to_compile_error(),
             };
 
             // Validate that a reply channel, when given, is also declared
@@ -1303,6 +1402,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         bindings: #bindings,
                         description: #operation_description,
                         reply: #reply_field,
+                        tags: #operation_tags,
                     }
                 );
             }
@@ -1333,8 +1433,52 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
         }
     }
 
-    let components_code = if all_message_types.is_empty() {
+    // Declared tags become components.tags entries, in declaration order.
+    let tag_entries: Vec<_> = spec_meta
+        .tag_defs
+        .iter()
+        .map(|tag| {
+            let tag_name = &tag.name;
+            let tag_description = if let Some(d) = &tag.description {
+                quote! { Some(#d.to_string()) }
+            } else {
+                quote! { None }
+            };
+            quote! {
+                tags.insert(
+                    #tag_name.to_string(),
+                    asyncapi_rust::Tag {
+                        name: #tag_name.to_string(),
+                        description: #tag_description,
+                    },
+                );
+            }
+        })
+        .collect();
+
+    let tags_code = if tag_entries.is_empty() {
         quote! { None }
+    } else {
+        quote! {
+            {
+                let mut tags = asyncapi_rust::indexmap::IndexMap::new();
+                #(#tag_entries)*
+                Some(tags)
+            }
+        }
+    };
+
+    let components_code = if all_message_types.is_empty() && tag_entries.is_empty() {
+        quote! { None }
+    } else if all_message_types.is_empty() {
+        // Tags only: no message types to walk.
+        quote! {
+            Some(asyncapi_rust::Components {
+                messages: None,
+                schemas: None,
+                tags: #tags_code,
+            })
+        }
     } else {
         let type_calls = all_message_types.iter().map(|type_name| {
             quote! {
@@ -1366,6 +1510,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 Some(asyncapi_rust::Components {
                     messages: if messages.is_empty() { None } else { Some(messages) },
                     schemas: if schemas.is_empty() { None } else { Some(schemas) },
+                    tags: #tags_code,
                 })
             }
         }
@@ -1384,6 +1529,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         title: #title.to_string(),
                         version: #version.to_string(),
                         description: #description,
+                        tags: #info_tags,
                     },
                     servers: #servers_code,
                     channels: #channels_code,

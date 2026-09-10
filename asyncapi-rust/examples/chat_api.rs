@@ -133,6 +133,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
             description: Some("Production WebSocket server".to_string()),
             variables: None,
             bindings: None,
+            ..Default::default()
         },
     );
 
@@ -145,6 +146,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
             messages: None, // Messages defined in components
             parameters: None,
             description: Some("Main chat channel".to_string()),
+            ..Default::default()
         },
     );
 
@@ -210,6 +212,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
     let components = Components {
         messages: Some(component_messages),
         schemas: None,
+        tags: None,
     };
 
     // Build the complete spec
@@ -222,6 +225,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
                 "Real-time chat application using WebSocket for bidirectional communication"
                     .to_string(),
             ),
+            ..Default::default()
         },
         servers: Some(servers),
         channels: Some(channels),

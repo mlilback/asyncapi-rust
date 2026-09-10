@@ -35,6 +35,7 @@
 //!         title: "My API".to_string(),
 //!         version: "1.0.0".to_string(),
 //!         description: Some("A simple API".to_string()),
+//!         ..Default::default()
 //!     },
 //!     servers: None,
 //!     channels: None,
@@ -70,6 +71,7 @@ use serde::{Deserialize, Serialize};
 ///         title: "My WebSocket API".to_string(),
 ///         version: "1.0.0".to_string(),
 ///         description: Some("Real-time messaging API".to_string()),
+///         ..Default::default()
 ///     },
 ///     servers: None,
 ///     channels: None,
@@ -107,7 +109,7 @@ pub struct AsyncApiSpec {
 /// Contains general metadata about the API such as title, version, and description.
 /// This information is displayed in documentation tools and helps users understand
 /// the purpose and version of the API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Info {
     /// API title
     ///
@@ -124,6 +126,10 @@ pub struct Info {
     /// A longer description of the API's purpose and functionality (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Tags categorizing the document as a whole
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tags: Option<Vec<TagRef>>,
 }
 
 /// Server connection information
@@ -189,6 +195,10 @@ pub struct Server {
     /// Protocol specific bindings.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bindings: Option<ServerBindings>,
+
+    /// Tags categorizing this server
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tags: Option<Vec<TagRef>>,
 }
 
 /// Protocol specific server bindings
@@ -361,6 +371,10 @@ pub struct Channel {
     /// Explains what the channel is for. CommonMark syntax may be used for rich text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Tags categorizing this channel
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tags: Option<Vec<TagRef>>,
 }
 
 /// Channel parameter definition
@@ -534,6 +548,10 @@ pub struct Message {
     /// Protocol specific bindings.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bindings: Option<MessageBindings>,
+
+    /// Tags categorizing this message
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tags: Option<Vec<TagRef>>,
 }
 
 /// Protocol specific message bindings
@@ -634,6 +652,10 @@ pub struct Operation {
     /// it may carry.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply: Option<OperationReply>,
+
+    /// Tags categorizing this operation
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tags: Option<Vec<TagRef>>,
 }
 
 /// Reply definition for a request/reply operation
@@ -755,6 +777,63 @@ pub struct Components {
     /// Schema definitions
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schemas: Option<IndexMap<String, Schema>>,
+
+    /// Reusable tag definitions
+    ///
+    /// Tags declared here are referenced from `info`, servers, channels,
+    /// operations, and messages as `#/components/tags/{name}`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<IndexMap<String, Tag>>,
+}
+
+/// A tag used to categorize parts of the document
+///
+/// Corresponds to the AsyncAPI 3.0 [Tag Object].
+///
+/// [Tag Object]: https://www.asyncapi.com/docs/reference/specification/v3.0.0#tagObject
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Tag {
+    /// Tag name
+    pub name: String,
+
+    /// Human-readable description of the tag
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// A tag reference, or an inline tag definition
+///
+/// The `AsyncApi` derive always emits [`TagRef::Reference`] pointing into
+/// `components.tags`; [`TagRef::Inline`] exists so hand-built specifications can
+/// attach a one-off tag without declaring it.
+///
+/// # Example
+///
+/// ```rust
+/// use asyncapi_rust_models::{Tag, TagRef};
+///
+/// let referenced = TagRef::Reference {
+///     reference: "#/components/tags/chat".to_string(),
+/// };
+///
+/// let inline = TagRef::Inline(Tag {
+///     name: "chat".to_string(),
+///     description: Some("Chat room messaging".to_string()),
+/// });
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TagRef {
+    /// Reference to a tag in the components section
+    ///
+    /// Format: "#/components/tags/{tagName}"
+    Reference {
+        /// $ref path
+        #[serde(rename = "$ref")]
+        reference: String,
+    },
+    /// Inline tag definition
+    Inline(Tag),
 }
 
 /// JSON Schema object
@@ -1009,6 +1088,7 @@ impl Default for AsyncApiSpec {
                 title: "API".to_string(),
                 version: "1.0.0".to_string(),
                 description: None,
+                tags: None,
             },
             servers: None,
             channels: None,

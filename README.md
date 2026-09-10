@@ -21,6 +21,7 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
   - [Server Variables and Channel Parameters](#server-variables-and-channel-parameters)
   - [Message Naming and Disambiguation](#message-naming-and-disambiguation)
   - [Request/Reply Operations](#requestreply-operations)
+  - [Tags](#tags)
 - [Examples](#examples)
 - [Motivation](#motivation)
 - [Comparison: Manual vs Generated](#comparison-manual-vs-generated)
@@ -44,10 +45,11 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 - 🌐 **Framework agnostic**: Works with actix-ws, axum, or any serde-compatible types
 - 📦 **Binary protocols**: Support for mixed text/binary WebSocket messages (Arrow IPC, Protobuf, etc.)
 - 🔌 **Protocol bindings**: MQTT server, operation, and message bindings (more protocols planned)
+- 🏷️ **Tags**: Declare once, reference from servers, channels, operations, and messages
 
 ## Migrating from 0.5.x
 
-**New in 0.6.0:** request/reply operations, channel and operation descriptions, and a fix for tag discriminants on newtype enum variants.
+**New in 0.6.0:** request/reply operations, tags, channel and operation descriptions, and a fix for tag discriminants on newtype enum variants.
 
 `Channel` gained a `description` field, and `Operation` gained `description` and `reply`. Both are `Option<_>`, and `Channel` now derives `Default` (as `Operation` already did), so deserialization, `..Default::default()`, and read-only access compile unchanged. **If you construct `Channel` or `Operation` with an explicit struct literal**, add the new fields or use the spread:
 
@@ -59,6 +61,8 @@ let channel = asyncapi_rust::Channel {
     ..Default::default()
 };
 ```
+
+Tags add a `tags` field to `Info`, `Server`, `Channel`, `Operation`, and `Message`, and a `tags` field to `Components`. `Info` now derives `Default` for the same reason. All are `Option<_>` with `#[serde(default)]`, so only explicit struct literals need updating.
 
 `description` on `#[asyncapi_channel(...)]` and `#[asyncapi_operation(...)]` was previously accepted and silently discarded; it is now emitted. If you had descriptions on those attributes, they will start appearing in the generated document.
 
@@ -309,6 +313,59 @@ At least one of `channel` or `address` is required. Reply message types are adde
 
 `description` is also accepted on `#[asyncapi_channel(...)]` and `#[asyncapi_operation(...)]` and emitted on the corresponding object.
 
+### Tags
+
+Tags categorize servers, channels, operations, and messages. Declare each one once with `#[asyncapi_tag(...)]`, then reference it by name:
+
+```rust
+#[derive(AsyncApi)]
+#[asyncapi(title = "Chat API", version = "1.0.0", tags = ["public"])]
+#[asyncapi_tag(name = "public", description = "Stable, publicly documented surface")]
+#[asyncapi_tag(name = "chat", description = "Chat room messaging")]
+#[asyncapi_server(name = "production", host = "api.example.com", protocol = "wss", tags = ["public"])]
+#[asyncapi_channel(name = "chat", address = "/ws/chat", tags = ["chat"])]
+#[asyncapi_operation(
+    name = "sendChatMessage",
+    action = "send",
+    channel = "chat",
+    messages = [ChatMessage],
+    tags = ["chat", "public"]
+)]
+struct ChatApi;
+```
+
+Messages carry tags through their own `#[asyncapi(...)]` attribute:
+
+```rust
+#[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+#[serde(tag = "type")]
+pub enum ChatMessage {
+    #[asyncapi(summary = "User joins", tags = ["chat"])]
+    UserJoin { username: String, room: String },
+}
+```
+
+Each declaration becomes one entry in `components.tags`, and every use site emits a `$ref` to it:
+
+```json
+{
+  "channels": {
+    "chat": { "address": "/ws/chat", "tags": [{ "$ref": "#/components/tags/chat" }] }
+  },
+  "components": {
+    "tags": { "chat": { "name": "chat", "description": "Chat room messaging" } }
+  }
+}
+```
+
+Referencing a tag that was never declared is a compile error:
+
+```
+error: unknown tag "chatt" on operation 'sendChatMessage'; declare it with #[asyncapi_tag(name = "chatt", ...)]
+```
+
+Tags on messages are the one exception: `ToAsyncApiMessage` can't see the API struct's declarations, so those names are emitted without validation.
+
 ## Examples
 
 See working examples in the `examples/` directory:
@@ -319,6 +376,7 @@ See working examples in the `examples/` directory:
 - **`server_variables.rs`** - Server variables and channel parameters for dynamic paths
 - **`mqtt_bindings.rs`** - MQTT server, operation, and message protocol bindings
 - **`request_reply.rs`** - Request/reply operations with `reply(...)`
+- **`tags.rs`** - Reusable tags on servers, channels, operations, and messages
 - **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
 - **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
 - **`generate_spec_file.rs`** - Generating specification files

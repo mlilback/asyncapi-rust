@@ -1353,3 +1353,96 @@ fn test_bare_ref_still_deserializes_as_reference() {
     assert_eq!(round_tripped["$ref"], "#/components/schemas/Foo");
     assert_eq!(round_tripped["description"], "annotated reference");
 }
+
+#[test]
+fn test_tags_are_declared_and_referenced() {
+    // #16: tags are declared once with #[asyncapi_tag(...)] and referenced by
+    // name from info, servers, channels, operations, and messages.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum TaggedMsg {
+        #[asyncapi(summary = "Chat", tags = ["chat"])]
+        Chat { text: String },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Tagged API", version = "1.0.0", tags = ["public"])]
+    #[asyncapi_tag(name = "public", description = "Stable, public surface")]
+    #[asyncapi_tag(name = "chat", description = "Chat room messaging")]
+    #[asyncapi_server(name = "prod", host = "api.example.com", protocol = "wss", tags = ["public"])]
+    #[asyncapi_channel(name = "chat", address = "/chat", tags = ["chat"])]
+    #[asyncapi_operation(
+        name = "sendChat",
+        action = "send",
+        channel = "chat",
+        messages = [TaggedMsg],
+        tags = ["chat", "public"]
+    )]
+    pub struct TaggedApi;
+
+    let json = serde_json::to_value(TaggedApi::asyncapi_spec()).unwrap();
+
+    // Definitions land in components.tags, in declaration order.
+    let tags = &json["components"]["tags"];
+    assert_eq!(tags["public"]["name"], "public");
+    assert_eq!(tags["public"]["description"], "Stable, public surface");
+    assert_eq!(tags["chat"]["description"], "Chat room messaging");
+
+    // All five sites reference them rather than inlining.
+    assert_eq!(json["info"]["tags"][0]["$ref"], "#/components/tags/public");
+    assert_eq!(
+        json["servers"]["prod"]["tags"][0]["$ref"],
+        "#/components/tags/public"
+    );
+    assert_eq!(
+        json["channels"]["chat"]["tags"][0]["$ref"],
+        "#/components/tags/chat"
+    );
+    assert_eq!(
+        json["operations"]["sendChat"]["tags"][0]["$ref"],
+        "#/components/tags/chat"
+    );
+    assert_eq!(
+        json["operations"]["sendChat"]["tags"][1]["$ref"],
+        "#/components/tags/public"
+    );
+    assert_eq!(
+        json["components"]["messages"]["Chat"]["tags"][0]["$ref"],
+        "#/components/tags/chat"
+    );
+}
+
+#[test]
+fn test_untagged_document_omits_tag_keys() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum PlainTagMsg {
+        Ping { n: u32 },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Plain API", version = "1.0.0")]
+    #[asyncapi_channel(name = "ping", address = "/ping")]
+    #[asyncapi_operation(name = "sendPing", action = "send", channel = "ping", messages = [PlainTagMsg])]
+    pub struct PlainTagApi;
+
+    let json = serde_json::to_value(PlainTagApi::asyncapi_spec()).unwrap();
+    assert!(json["info"].get("tags").is_none());
+    assert!(json["channels"]["ping"].get("tags").is_none());
+    assert!(json["operations"]["sendPing"].get("tags").is_none());
+    assert!(json["components"].get("tags").is_none());
+}
+
+#[test]
+fn test_tags_only_document_still_emits_components() {
+    // A document with tags but no message types must still get a components
+    // section, or every tag $ref would dangle.
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Tags Only", version = "1.0.0", tags = ["public"])]
+    #[asyncapi_tag(name = "public", description = "Public surface")]
+    pub struct TagsOnlyApi;
+
+    let json = serde_json::to_value(TagsOnlyApi::asyncapi_spec()).unwrap();
+    assert_eq!(json["components"]["tags"]["public"]["name"], "public");
+    assert!(json["components"].get("messages").is_none());
+}

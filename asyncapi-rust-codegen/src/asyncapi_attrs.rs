@@ -34,6 +34,9 @@ pub struct AsyncApiMeta {
     /// Override the message name used in `components.messages` and `asyncapi_message_names()`.
     /// When absent the Rust variant/type identifier is used.
     pub message_name: Option<String>,
+    /// Tag names referenced from `tags = [...]`; resolved against the
+    /// `#[asyncapi_tag(...)]` declarations on the API struct.
+    pub tags: Vec<String>,
     pub mqtt: Option<MqttMessageBindingsMeta>,
 }
 
@@ -78,6 +81,15 @@ pub fn extract_asyncapi_meta(attrs: &[Attribute]) -> syn::Result<AsyncApiMeta> {
                 let value = nested.value()?;
                 let s: syn::LitStr = value.parse()?;
                 meta.content_type = Some(s.value());
+            } else if nested.path.is_ident("tags") {
+                use syn::Token;
+                use syn::punctuated::Punctuated;
+                let _ = nested.value()?;
+                let content;
+                syn::bracketed!(content in nested.input);
+                let names: Punctuated<syn::LitStr, Token![,]> =
+                    content.parse_terminated(|stream| stream.parse(), Token![,])?;
+                meta.tags = names.into_iter().map(|lit| lit.value()).collect();
             } else if nested.path.is_ident("triggers_binary") {
                 // Flag attribute (no value)
                 meta.triggers_binary = true;

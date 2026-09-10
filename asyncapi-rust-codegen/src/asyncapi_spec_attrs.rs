@@ -47,6 +47,51 @@ fn message_type_path(ty: syn::Type, attr_name: &str) -> syn::Result<Path> {
     Ok(type_path.path.clone())
 }
 
+/// Parse `tags = ["a", "b"]` from nested meta.
+///
+/// Tag references are plain names; they are resolved against the
+/// `#[asyncapi_tag(...)]` declarations when the spec is generated, so an
+/// unknown name becomes a compile error rather than a dangling `$ref`.
+fn extract_tag_names(nested: &syn::meta::ParseNestedMeta) -> syn::Result<Vec<String>> {
+    use syn::Token;
+    use syn::punctuated::Punctuated;
+
+    let _ = nested.value()?;
+    let content;
+    syn::bracketed!(content in nested.input);
+    let names: Punctuated<LitStr, Token![,]> =
+        content.parse_terminated(|stream| stream.parse(), Token![,])?;
+    Ok(names.into_iter().map(|lit| lit.value()).collect())
+}
+
+/// Extract a tag declaration from `#[asyncapi_tag(name = "...", description = "...")]`
+fn extract_tag_def(attr: &Attribute) -> syn::Result<TagMeta> {
+    let mut name = None;
+    let mut description = None;
+
+    attr.parse_nested_meta(|nested| {
+        if nested.path.is_ident("name") {
+            let value = nested.value()?;
+            let s: LitStr = value.parse()?;
+            name = Some(s.value());
+        } else if nested.path.is_ident("description") {
+            let value = nested.value()?;
+            let s: LitStr = value.parse()?;
+            description = Some(s.value());
+        }
+        Ok(())
+    })?;
+
+    let Some(name) = name else {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "`#[asyncapi_tag(...)]` requires `name = \"...\"`",
+        ));
+    };
+
+    Ok(TagMeta { name, description })
+}
+
 /// AsyncAPI spec metadata extracted from attributes
 #[derive(Debug, Default, Clone)]
 pub struct AsyncApiSpecMeta {
@@ -57,6 +102,17 @@ pub struct AsyncApiSpecMeta {
     pub channels: Vec<ChannelMeta>,
     pub operations: Vec<OperationMeta>,
     pub message_types: Vec<Path>,
+    /// Tags declared with #[asyncapi_tag(...)], becoming components.tags
+    pub tag_defs: Vec<TagMeta>,
+    /// Tag names referenced from #[asyncapi(tags = [...])] for info.tags
+    pub tags: Vec<String>,
+}
+
+/// A tag declared with `#[asyncapi_tag(name = "...", description = "...")]`
+#[derive(Debug, Clone)]
+pub struct TagMeta {
+    pub name: String,
+    pub description: Option<String>,
 }
 
 /// Server metadata
@@ -69,6 +125,7 @@ pub struct ServerMeta {
     pub description: Option<String>,
     pub variables: Vec<ServerVariableMeta>,
     pub mqtt: Option<MqttServerBindingsMeta>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +170,7 @@ pub struct ChannelMeta {
     pub address: Option<String>,
     pub description: Option<String>,
     pub parameters: Vec<ParameterMeta>,
+    pub tags: Vec<String>,
 }
 
 /// Channel parameter metadata
@@ -136,6 +194,7 @@ pub struct OperationMeta {
     pub messages: Vec<Path>,
     pub mqtt: Option<OperationMqttBindingsMeta>,
     pub reply: Option<OperationReplyMeta>,
+    pub tags: Vec<String>,
 }
 
 /// Reply metadata from `reply(...)` inside `#[asyncapi_operation(...)]`
@@ -198,9 +257,13 @@ pub fn extract_asyncapi_spec_meta(attrs: &[Attribute]) -> syn::Result<AsyncApiSp
                     let value = nested.value()?;
                     let s: syn::LitStr = value.parse()?;
                     meta.description = Some(s.value());
+                } else if nested.path.is_ident("tags") {
+                    meta.tags = extract_tag_names(&nested)?;
                 }
                 Ok(())
             })?;
+        } else if attr.path().is_ident("asyncapi_tag") {
+            meta.tag_defs.push(extract_tag_def(attr)?);
         } else if attr.path().is_ident("asyncapi_server") {
             // Parse server attributes
             if let Some(server) = extract_server(attr)? {
@@ -241,6 +304,7 @@ fn extract_message_types(attr: &Attribute) -> syn::Result<Vec<Path>> {
 /// Extract server metadata from `#[asyncapi_server(...)]` attribute
 fn extract_server(attr: &Attribute) -> syn::Result<Option<ServerMeta>> {
     let mut name = None;
+    let mut tags = Vec::new();
     let mut host = None;
     let mut protocol = None;
     let mut pathname = None;
@@ -278,6 +342,8 @@ fn extract_server(attr: &Attribute) -> syn::Result<Option<ServerMeta>> {
             if let Some(var) = extract_mqtt_server_bindings(&nested)? {
                 mqtt = Some(var);
             }
+        } else if nested.path.is_ident("tags") {
+            tags = extract_tag_names(&nested)?;
         }
         Ok(())
     })?;
@@ -294,6 +360,7 @@ fn extract_server(attr: &Attribute) -> syn::Result<Option<ServerMeta>> {
         description,
         variables,
         mqtt,
+        tags,
     }))
 }
 
@@ -445,6 +512,7 @@ fn extract_server_variable(
 /// Extract channel metadata from `#[asyncapi_channel(...)]` attribute
 fn extract_channel(attr: &Attribute) -> syn::Result<Option<ChannelMeta>> {
     let mut name = None;
+    let mut tags = Vec::new();
     let mut address = None;
     let mut description = None;
     let mut parameters = Vec::new();
@@ -467,6 +535,8 @@ fn extract_channel(attr: &Attribute) -> syn::Result<Option<ChannelMeta>> {
             if let Some(param) = extract_channel_parameter(&nested)? {
                 parameters.push(param);
             }
+        } else if nested.path.is_ident("tags") {
+            tags = extract_tag_names(&nested)?;
         }
         Ok(())
     })?;
@@ -480,6 +550,7 @@ fn extract_channel(attr: &Attribute) -> syn::Result<Option<ChannelMeta>> {
         address,
         description,
         parameters,
+        tags,
     }))
 }
 
@@ -585,6 +656,7 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
     use syn::punctuated::Punctuated;
 
     let mut name = None;
+    let mut tags = Vec::new();
     let mut action = None;
     let mut channel = None;
     let mut description = None;
@@ -624,6 +696,8 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
             mqtt = extract_mqtt_operation_bindings(&nested)?;
         } else if nested.path.is_ident("reply") {
             reply = Some(extract_operation_reply(&nested)?);
+        } else if nested.path.is_ident("tags") {
+            tags = extract_tag_names(&nested)?;
         }
         Ok(())
     })?;
@@ -640,6 +714,7 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
         messages,
         mqtt,
         reply,
+        tags,
     }))
 }
 
@@ -1008,6 +1083,52 @@ mod tests {
             err.to_string().contains("expects a type path"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn test_extract_tag_definitions_and_references() {
+        let attrs: Vec<Attribute> = vec![
+            parse_quote! { #[asyncapi(title = "T", version = "1.0.0", tags = ["public"])] },
+            parse_quote! { #[asyncapi_tag(name = "public", description = "Public surface")] },
+            parse_quote! { #[asyncapi_tag(name = "chat")] },
+            parse_quote! { #[asyncapi_channel(name = "chat", address = "/chat", tags = ["chat"])] },
+            parse_quote! {
+                #[asyncapi_operation(
+                    name = "send",
+                    action = "send",
+                    channel = "chat",
+                    tags = ["chat", "public"]
+                )]
+            },
+        ];
+
+        let meta = extract_asyncapi_spec_meta(&attrs).unwrap();
+
+        assert_eq!(meta.tag_defs.len(), 2);
+        assert_eq!(meta.tag_defs[0].name, "public");
+        assert_eq!(
+            meta.tag_defs[0].description.as_deref(),
+            Some("Public surface")
+        );
+        assert_eq!(meta.tag_defs[1].name, "chat");
+        assert!(meta.tag_defs[1].description.is_none());
+
+        assert_eq!(meta.tags, vec!["public".to_string()]);
+        assert_eq!(meta.channels[0].tags, vec!["chat".to_string()]);
+        assert_eq!(
+            meta.operations[0].tags,
+            vec!["chat".to_string(), "public".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_tag_definition_requires_name() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_tag(description = "no name given")]
+        }];
+
+        let err = extract_asyncapi_spec_meta(&attrs).unwrap_err();
+        assert!(err.to_string().contains("requires `name"), "got: {err}");
     }
 
     #[test]
