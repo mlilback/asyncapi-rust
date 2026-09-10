@@ -137,6 +137,34 @@
 //! - `channel = "..."` - Channel reference (required)
 //! - `description = "..."` - Operation description (optional)
 //! - `messages = [Type1, Type2, ...]` - Message types available for this operation (optional)
+//! - `reply(...)` - Reply information for request/reply operations (optional)
+//!
+//! ### `reply(...)` inside `#[asyncapi_operation(...)]`
+//!
+//! Describes where a reply to the operation is expected:
+//!
+//! - `channel = "..."` - Channel the reply is sent to; must be a declared channel
+//! - `address(location = "...", description = "...")` - Runtime expression for the
+//!   reply destination, e.g. `location = "$message.header#/replyTo"`
+//! - `messages = [Type1, ...]` - Message types the reply may carry (requires `channel`)
+//!
+//! At least one of `channel` or `address` is required. Reply messages are added to
+//! the reply channel and to `components`, so the emitted
+//! `#/channels/{channel}/messages/{message}` references resolve.
+//!
+//! ```ignore
+//! #[asyncapi_operation(
+//!     name = "askQuestion",
+//!     action = "send",
+//!     channel = "ask",
+//!     messages = [Question],
+//!     reply(
+//!         channel = "answers",
+//!         address(location = "$message.header#/replyTo"),
+//!         messages = [Answer]
+//!     )
+//! )]
+//! ```
 //!
 //! When the `messages` parameter is specified on operations, those messages are automatically
 //! added to the channel that the operation references. Operation messages reference the channel's
@@ -940,24 +968,35 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 }
             };
 
-            // Collect messages from all operations that reference this channel
+            // Collect messages from all operations that reference this channel,
+            // either as their own channel or as the channel a reply is sent to.
+            // Reply messages must live on the reply channel for the
+            // `#/channels/{c}/messages/{m}` refs the reply emits to resolve.
             let channel_name_str = name.as_str();
-            let operations_for_channel: Vec<_> = spec_meta
+            let message_types_for_channel: Vec<&syn::Path> = spec_meta
                 .operations
                 .iter()
-                .filter(|op| op.channel == channel_name_str)
+                .flat_map(|op| {
+                    let own = (op.channel == channel_name_str)
+                        .then(|| op.messages.iter())
+                        .into_iter()
+                        .flatten();
+                    let replied = op
+                        .reply
+                        .as_ref()
+                        .filter(|reply| reply.channel.as_deref() == Some(channel_name_str))
+                        .map(|reply| reply.messages.iter())
+                        .into_iter()
+                        .flatten();
+                    own.chain(replied)
+                })
                 .collect();
 
-            let messages_field = if operations_for_channel.is_empty()
-                || operations_for_channel
-                    .iter()
-                    .all(|op| op.messages.is_empty())
-            {
+            let messages_field = if message_types_for_channel.is_empty() {
                 quote! { None }
             } else {
-                let message_calls: Vec<_> = operations_for_channel
+                let message_calls: Vec<_> = message_types_for_channel
                     .iter()
-                    .flat_map(|op| &op.messages) // Deduplicate
                     .map(|type_name| {
                         quote! {
                             // Call asyncapi_message_names() for this type and add references
@@ -1031,6 +1070,115 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
 
             let operation_description = if let Some(d) = &operation.description {
                 quote! { Some(#d.to_string()) }
+            } else {
+                quote! { None }
+            };
+
+            // Validate that a reply channel, when given, is also declared
+            if let Some(reply_channel) = operation.reply.as_ref().and_then(|r| r.channel.as_ref())
+                && !spec_meta
+                    .channels
+                    .iter()
+                    .any(|channel| channel.name == *reply_channel)
+            {
+                return syn::Error::new_spanned(
+                    reply_channel,
+                    format!(
+                        "Operation '{}' replies to unknown channel '{}'",
+                        name, reply_channel
+                    ),
+                )
+                .to_compile_error();
+            }
+
+            // Reply messages are referenced from the reply channel, so a reply
+            // that lists messages needs a channel to hang them on.
+            if let Some(reply) = &operation.reply
+                && !reply.messages.is_empty()
+                && reply.channel.is_none()
+            {
+                return syn::Error::new_spanned(
+                    name,
+                    format!(
+                        "Operation '{}' declares reply messages but no reply `channel = \"...\"`; \
+                         reply messages are referenced from the reply channel",
+                        name
+                    ),
+                )
+                .to_compile_error();
+            }
+
+            let reply_field = if let Some(reply) = &operation.reply {
+                let reply_address = if let Some(address) = &reply.address {
+                    let location = &address.location;
+                    let addr_desc = if let Some(d) = &address.description {
+                        quote! { Some(#d.to_string()) }
+                    } else {
+                        quote! { None }
+                    };
+                    quote! {
+                        Some(asyncapi_rust::OperationReplyAddress {
+                            location: #location.to_string(),
+                            description: #addr_desc,
+                        })
+                    }
+                } else {
+                    quote! { None }
+                };
+
+                let reply_channel_field = if let Some(c) = &reply.channel {
+                    quote! {
+                        Some(asyncapi_rust::ChannelRef {
+                            reference: format!("#/channels/{}", #c),
+                        })
+                    }
+                } else {
+                    quote! { None }
+                };
+
+                let reply_messages_field = if reply.messages.is_empty() {
+                    quote! { None }
+                } else {
+                    // Safe to unwrap: the check above rejects reply messages
+                    // without a reply channel.
+                    let reply_channel = reply.channel.as_ref().unwrap();
+                    let message_calls = reply.messages.iter().map(|type_name| {
+                        quote! {
+                            for msg_name in #type_name::asyncapi_message_names() {
+                                reply_message_refs
+                                    .entry(msg_name.to_string())
+                                    .or_insert_with(|| {
+                                        asyncapi_rust::MessageRef::Reference {
+                                            reference: format!(
+                                                "#/channels/{}/messages/{}",
+                                                #reply_channel,
+                                                msg_name
+                                            ),
+                                        }
+                                    });
+                            }
+                        }
+                    });
+
+                    quote! {
+                        {
+                            let mut reply_message_refs =
+                                asyncapi_rust::indexmap::IndexMap::new();
+
+                            #(#message_calls)*
+
+                            Some(reply_message_refs.into_values().collect())
+                        }
+                    }
+                };
+
+                quote! {
+                    Some(asyncapi_rust::OperationReply {
+                        address: #reply_address,
+                        channel: #reply_channel_field,
+                        messages: #reply_messages_field,
+                    })
+                }
             } else {
                 quote! { None }
             };
@@ -1154,6 +1302,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         messages: #messages_field,
                         bindings: #bindings,
                         description: #operation_description,
+                        reply: #reply_field,
                     }
                 );
             }
@@ -1171,11 +1320,14 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
     // Generate components with messages and hoisted shared schemas
     let mut all_message_types = spec_meta.message_types.clone();
 
-    for type_name in spec_meta
-        .operations
-        .iter()
-        .flat_map(|operation| operation.messages.iter())
-    {
+    for type_name in spec_meta.operations.iter().flat_map(|operation| {
+        operation.messages.iter().chain(
+            operation
+                .reply
+                .iter()
+                .flat_map(|reply| reply.messages.iter()),
+        )
+    }) {
         if !all_message_types.contains(type_name) {
             all_message_types.push(type_name.clone());
         }

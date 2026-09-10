@@ -1,5 +1,6 @@
 //! Utilities for parsing asyncapi spec-level attributes
 
+use syn::spanned::Spanned;
 use syn::{Attribute, LitStr, Path};
 
 /// Convert a parsed type into the plain type path the message lists require.
@@ -134,6 +135,22 @@ pub struct OperationMeta {
     pub description: Option<String>,
     pub messages: Vec<Path>,
     pub mqtt: Option<OperationMqttBindingsMeta>,
+    pub reply: Option<OperationReplyMeta>,
+}
+
+/// Reply metadata from `reply(...)` inside `#[asyncapi_operation(...)]`
+#[derive(Debug, Clone, Default)]
+pub struct OperationReplyMeta {
+    pub channel: Option<String>,
+    pub address: Option<ReplyAddressMeta>,
+    pub messages: Vec<Path>,
+}
+
+/// Reply address metadata from `address(...)` inside `reply(...)`
+#[derive(Debug, Clone)]
+pub struct ReplyAddressMeta {
+    pub location: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -573,6 +590,7 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
     let mut description = None;
     let mut messages = Vec::new();
     let mut mqtt = None;
+    let mut reply = None;
 
     attr.parse_nested_meta(|nested| {
         if nested.path.is_ident("name") {
@@ -604,6 +622,8 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
                 .collect::<syn::Result<Vec<_>>>()?;
         } else if nested.path.is_ident("mqtt") {
             mqtt = extract_mqtt_operation_bindings(&nested)?;
+        } else if nested.path.is_ident("reply") {
+            reply = Some(extract_operation_reply(&nested)?);
         }
         Ok(())
     })?;
@@ -619,7 +639,88 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
         description,
         messages,
         mqtt,
+        reply,
     }))
+}
+
+/// Extract `reply(...)` from nested meta (called from within parse_nested_meta)
+///
+/// Mirrors the AsyncAPI 3.0 Operation Reply Object:
+/// `reply(channel = "...", address(location = "...", description = "..."), messages = [Type, ...])`
+fn extract_operation_reply(nested: &syn::meta::ParseNestedMeta) -> syn::Result<OperationReplyMeta> {
+    use syn::Token;
+    use syn::punctuated::Punctuated;
+
+    let mut channel = None;
+    let mut address = None;
+    let mut messages = Vec::new();
+
+    nested.parse_nested_meta(|inner| {
+        if inner.path.is_ident("channel") {
+            let value = inner.value()?;
+            let s: LitStr = value.parse()?;
+            channel = Some(s.value());
+        } else if inner.path.is_ident("address") {
+            address = Some(extract_reply_address(&inner)?);
+        } else if inner.path.is_ident("messages") {
+            let _ = inner.value()?;
+            let content;
+            syn::bracketed!(content in inner.input);
+            let types: Punctuated<syn::Type, Token![,]> =
+                content.parse_terminated(|stream| stream.parse(), Token![,])?;
+            messages = types
+                .into_iter()
+                .map(|ty| message_type_path(ty, "reply messages"))
+                .collect::<syn::Result<Vec<_>>>()?;
+        }
+        Ok(())
+    })?;
+
+    // The spec requires at least one of address or channel for a reply to mean
+    // anything; messages alone have nowhere to be sent.
+    if channel.is_none() && address.is_none() {
+        return Err(syn::Error::new(
+            nested.path.span(),
+            "`reply(...)` requires at least one of `channel = \"...\"` or `address(location = \"...\")`",
+        ));
+    }
+
+    Ok(OperationReplyMeta {
+        channel,
+        address,
+        messages,
+    })
+}
+
+/// Extract `address(...)` from nested meta inside `reply(...)`
+fn extract_reply_address(nested: &syn::meta::ParseNestedMeta) -> syn::Result<ReplyAddressMeta> {
+    let mut location = None;
+    let mut description = None;
+
+    nested.parse_nested_meta(|inner| {
+        if inner.path.is_ident("location") {
+            let value = inner.value()?;
+            let s: LitStr = value.parse()?;
+            location = Some(s.value());
+        } else if inner.path.is_ident("description") {
+            let value = inner.value()?;
+            let s: LitStr = value.parse()?;
+            description = Some(s.value());
+        }
+        Ok(())
+    })?;
+
+    let Some(location) = location else {
+        return Err(syn::Error::new(
+            nested.path.span(),
+            "`address(...)` requires `location = \"...\"`, e.g. `location = \"$message.header#/replyTo\"`",
+        ));
+    };
+
+    Ok(ReplyAddressMeta {
+        location,
+        description,
+    })
 }
 
 #[cfg(test)]
@@ -775,6 +876,82 @@ mod tests {
         assert_eq!(
             quote!(#(#messages),*).to_string(),
             "Plain , crate :: msgs :: Nested"
+        );
+    }
+
+    #[test]
+    fn test_extract_operation_reply() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "askQuestion",
+                action = "send",
+                channel = "ask",
+                reply(
+                    channel = "answers",
+                    address(location = "$message.header#/replyTo", description = "Where to answer"),
+                    messages = [AnswerMsg]
+                )
+            )]
+        }];
+
+        let meta = extract_asyncapi_spec_meta(&attrs).unwrap();
+        let reply = meta.operations[0].reply.clone().unwrap();
+
+        assert_eq!(reply.channel.as_deref(), Some("answers"));
+        let address = reply.address.unwrap();
+        assert_eq!(address.location, "$message.header#/replyTo");
+        assert_eq!(address.description.as_deref(), Some("Where to answer"));
+        assert_eq!(reply.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_reply_requires_channel_or_address() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "askQuestion",
+                action = "send",
+                channel = "ask",
+                reply(messages = [AnswerMsg])
+            )]
+        }];
+
+        let err = extract_asyncapi_spec_meta(&attrs).unwrap_err();
+        assert!(
+            err.to_string().contains("requires at least one of"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reply_address_requires_location() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "askQuestion",
+                action = "send",
+                channel = "ask",
+                reply(address(description = "no location given"))
+            )]
+        }];
+
+        let err = extract_asyncapi_spec_meta(&attrs).unwrap_err();
+        assert!(err.to_string().contains("requires `location"), "got: {err}");
+    }
+
+    #[test]
+    fn test_reply_messages_reject_generic_types() {
+        let attrs: Vec<Attribute> = vec![parse_quote! {
+            #[asyncapi_operation(
+                name = "askQuestion",
+                action = "send",
+                channel = "ask",
+                reply(channel = "answers", messages = [Option<AnswerMsg>])
+            )]
+        }];
+
+        let err = extract_asyncapi_spec_meta(&attrs).unwrap_err();
+        assert!(
+            err.to_string().contains("does not support generic types"),
+            "got: {err}"
         );
     }
 

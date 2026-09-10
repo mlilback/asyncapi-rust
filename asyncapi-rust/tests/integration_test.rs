@@ -1106,6 +1106,171 @@ fn test_adjacently_tagged_enum() {
         "discriminant 'data' must appear in Data payload schema"
     );
 }
+
+#[test]
+fn test_channel_and_operation_descriptions_are_emitted() {
+    // Regression from #24: `description` on #[asyncapi_channel] and
+    // #[asyncapi_operation] was parsed into the meta structs and then dropped,
+    // because neither model carried a description field.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum DescMsg {
+        Echo { text: String },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Desc API", version = "1.0.0")]
+    #[asyncapi_channel(name = "chat", address = "/chat", description = "The chat channel")]
+    #[asyncapi_operation(
+        name = "sendChat",
+        action = "send",
+        channel = "chat",
+        description = "Send a chat message",
+        messages = [DescMsg]
+    )]
+    pub struct DescApi;
+
+    let spec = DescApi::asyncapi_spec();
+
+    let channel = spec.channels.as_ref().unwrap().get("chat").unwrap();
+    assert_eq!(channel.description.as_deref(), Some("The chat channel"));
+
+    let operation = spec.operations.as_ref().unwrap().get("sendChat").unwrap();
+    assert_eq!(
+        operation.description.as_deref(),
+        Some("Send a chat message")
+    );
+
+    // And they must survive serialization under the spec-mandated key.
+    let json = serde_json::to_value(&spec).unwrap();
+    assert_eq!(json["channels"]["chat"]["description"], "The chat channel");
+    assert_eq!(
+        json["operations"]["sendChat"]["description"],
+        "Send a chat message"
+    );
+}
+
+#[test]
+fn test_descriptions_omitted_when_absent() {
+    // description is optional: no key at all rather than a null.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum NoDescMsg {
+        Ping { n: u32 },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "No Desc API", version = "1.0.0")]
+    #[asyncapi_channel(name = "plain", address = "/plain")]
+    #[asyncapi_operation(name = "sendPlain", action = "send", channel = "plain", messages = [NoDescMsg])]
+    pub struct NoDescApi;
+
+    let json = serde_json::to_value(NoDescApi::asyncapi_spec()).unwrap();
+    assert!(json["channels"]["plain"].get("description").is_none());
+    assert!(json["operations"]["sendPlain"].get("description").is_none());
+}
+
+#[test]
+fn test_operation_reply_is_emitted() {
+    // #20: request/reply operations describe where the answer goes.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum AskMsg {
+        Ask { q: String },
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum AnswerMsg {
+        Answer { a: String },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Reply API", version = "1.0.0")]
+    #[asyncapi_channel(name = "ask", address = "/ask")]
+    #[asyncapi_channel(name = "answers", address = "/answers")]
+    #[asyncapi_operation(
+        name = "askQuestion",
+        action = "send",
+        channel = "ask",
+        messages = [AskMsg],
+        reply(
+            channel = "answers",
+            address(location = "$message.header#/replyTo", description = "Where to answer"),
+            messages = [AnswerMsg]
+        )
+    )]
+    pub struct ReplyApi;
+
+    let json = serde_json::to_value(ReplyApi::asyncapi_spec()).unwrap();
+    let reply = &json["operations"]["askQuestion"]["reply"];
+
+    assert_eq!(reply["channel"]["$ref"], "#/channels/answers");
+    assert_eq!(reply["address"]["location"], "$message.header#/replyTo");
+    assert_eq!(reply["address"]["description"], "Where to answer");
+    assert_eq!(
+        reply["messages"][0]["$ref"],
+        "#/channels/answers/messages/Answer"
+    );
+
+    // Every ref the reply emits must resolve: the reply message has to be on
+    // the reply channel, and in components.
+    assert_eq!(
+        json["channels"]["answers"]["messages"]["Answer"]["$ref"],
+        "#/components/messages/Answer"
+    );
+    assert!(json["components"]["messages"]["Answer"].is_object());
+}
+
+#[test]
+fn test_operation_reply_address_only() {
+    // A reply may give only a runtime address, with no channel and no messages.
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum PingMsg {
+        Ping { n: u32 },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Addr API", version = "1.0.0")]
+    #[asyncapi_channel(name = "ping", address = "/ping")]
+    #[asyncapi_operation(
+        name = "sendPing",
+        action = "send",
+        channel = "ping",
+        messages = [PingMsg],
+        reply(address(location = "$message.header#/replyTo"))
+    )]
+    pub struct AddrApi;
+
+    let json = serde_json::to_value(AddrApi::asyncapi_spec()).unwrap();
+    let reply = &json["operations"]["sendPing"]["reply"];
+
+    assert_eq!(reply["address"]["location"], "$message.header#/replyTo");
+    assert!(reply.get("channel").is_none());
+    assert!(reply.get("messages").is_none());
+    // An address with no description omits the key entirely.
+    assert!(reply["address"].get("description").is_none());
+}
+
+#[test]
+fn test_operation_without_reply_omits_key() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum PlainMsg {
+        Tick { n: u32 },
+    }
+
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Plain API", version = "1.0.0")]
+    #[asyncapi_channel(name = "ticks", address = "/ticks")]
+    #[asyncapi_operation(name = "sendTick", action = "send", channel = "ticks", messages = [PlainMsg])]
+    pub struct PlainApi;
+
+    let json = serde_json::to_value(PlainApi::asyncapi_spec()).unwrap();
+    assert!(json["operations"]["sendTick"].get("reply").is_none());
+}
+
 #[test]
 fn test_newtype_variant_keeps_tag_discriminant() {
     // #18: an internally-tagged newtype variant is emitted by schemars as a
@@ -1187,67 +1352,4 @@ fn test_bare_ref_still_deserializes_as_reference() {
     let round_tripped = serde_json::to_value(&with_siblings).unwrap();
     assert_eq!(round_tripped["$ref"], "#/components/schemas/Foo");
     assert_eq!(round_tripped["description"], "annotated reference");
-}
-
-#[test]
-fn test_channel_and_operation_descriptions_are_emitted() {
-    // Regression from #24: `description` on #[asyncapi_channel] and
-    // #[asyncapi_operation] was parsed into the meta structs and then dropped,
-    // because neither model carried a description field.
-    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
-    #[serde(tag = "type")]
-    pub enum DescMsg {
-        Echo { text: String },
-    }
-
-    #[derive(AsyncApi)]
-    #[asyncapi(title = "Desc API", version = "1.0.0")]
-    #[asyncapi_channel(name = "chat", address = "/chat", description = "The chat channel")]
-    #[asyncapi_operation(
-        name = "sendChat",
-        action = "send",
-        channel = "chat",
-        description = "Send a chat message",
-        messages = [DescMsg]
-    )]
-    pub struct DescApi;
-
-    let spec = DescApi::asyncapi_spec();
-
-    let channel = spec.channels.as_ref().unwrap().get("chat").unwrap();
-    assert_eq!(channel.description.as_deref(), Some("The chat channel"));
-
-    let operation = spec.operations.as_ref().unwrap().get("sendChat").unwrap();
-    assert_eq!(
-        operation.description.as_deref(),
-        Some("Send a chat message")
-    );
-
-    // And they must survive serialization under the spec-mandated key.
-    let json = serde_json::to_value(&spec).unwrap();
-    assert_eq!(json["channels"]["chat"]["description"], "The chat channel");
-    assert_eq!(
-        json["operations"]["sendChat"]["description"],
-        "Send a chat message"
-    );
-}
-
-#[test]
-fn test_descriptions_omitted_when_absent() {
-    // description is optional: no key at all rather than a null.
-    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
-    #[serde(tag = "type")]
-    pub enum NoDescMsg {
-        Ping { n: u32 },
-    }
-
-    #[derive(AsyncApi)]
-    #[asyncapi(title = "No Desc API", version = "1.0.0")]
-    #[asyncapi_channel(name = "plain", address = "/plain")]
-    #[asyncapi_operation(name = "sendPlain", action = "send", channel = "plain", messages = [NoDescMsg])]
-    pub struct NoDescApi;
-
-    let json = serde_json::to_value(NoDescApi::asyncapi_spec()).unwrap();
-    assert!(json["channels"]["plain"].get("description").is_none());
-    assert!(json["operations"]["sendPlain"].get("description").is_none());
 }

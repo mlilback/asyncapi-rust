@@ -627,6 +627,71 @@ pub struct Operation {
     /// Explains what the operation does. CommonMark syntax may be used for rich text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Reply information for a request/reply operation
+    ///
+    /// Describes where a reply to this operation is expected and which messages
+    /// it may carry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply: Option<OperationReply>,
+}
+
+/// Reply definition for a request/reply operation
+///
+/// Corresponds to the AsyncAPI 3.0 [Operation Reply Object]. At least one of
+/// `address` or `channel` is required by the specification for the reply to be
+/// meaningful.
+///
+/// [Operation Reply Object]: https://www.asyncapi.com/docs/reference/specification/v3.0.0#operationReplyObject
+///
+/// # Example
+///
+/// ```rust
+/// use asyncapi_rust_models::{ChannelRef, OperationReply, OperationReplyAddress};
+///
+/// let reply = OperationReply {
+///     channel: Some(ChannelRef {
+///         reference: "#/channels/chatReply".to_string(),
+///     }),
+///     address: Some(OperationReplyAddress {
+///         location: "$message.header#/replyTo".to_string(),
+///         description: Some("Runtime reply destination".to_string()),
+///     }),
+///     messages: None,
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OperationReply {
+    /// Runtime location of the reply address
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<OperationReplyAddress>,
+
+    /// Channel the reply is sent to
+    ///
+    /// Points at a channel defined in this document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<ChannelRef>,
+
+    /// Messages the reply may carry
+    ///
+    /// Per the specification these must reference messages of the reply channel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub messages: Option<Vec<MessageRef>>,
+}
+
+/// Runtime expression identifying where a reply should be sent
+///
+/// Corresponds to the AsyncAPI 3.0 [Operation Reply Address Object].
+///
+/// [Operation Reply Address Object]: https://www.asyncapi.com/docs/reference/specification/v3.0.0#operationReplyAddressObject
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OperationReplyAddress {
+    /// Runtime expression, e.g. `$message.header#/replyTo`
+    pub location: String,
+
+    /// Human-readable description of the address
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Protocol specific operation bindings
