@@ -12,6 +12,7 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 ## Table of Contents
 
 - [Features](#features)
+- [Migrating from 0.5.x](#migrating-from-05x)
 - [Migrating from 0.4.x](#migrating-from-04x)
 - [Migrating from 0.3.x](#migrating-from-03x)
 - [Migrating from 0.2.x](#migrating-from-02x)
@@ -19,6 +20,7 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
   - [Message Integration](#message-integration)
   - [Server Variables and Channel Parameters](#server-variables-and-channel-parameters)
   - [Message Naming and Disambiguation](#message-naming-and-disambiguation)
+  - [Request/Reply Operations](#requestreply-operations)
 - [Examples](#examples)
 - [Motivation](#motivation)
 - [Comparison: Manual vs Generated](#comparison-manual-vs-generated)
@@ -42,6 +44,25 @@ Generate AsyncAPI documentation directly from your Rust code using procedural ma
 - 🌐 **Framework agnostic**: Works with actix-ws, axum, or any serde-compatible types
 - 📦 **Binary protocols**: Support for mixed text/binary WebSocket messages (Arrow IPC, Protobuf, etc.)
 - 🔌 **Protocol bindings**: MQTT server, operation, and message bindings (more protocols planned)
+
+## Migrating from 0.5.x
+
+**New in 0.6.0:** request/reply operations, channel and operation descriptions, and a fix for tag discriminants on newtype enum variants.
+
+`Channel` gained a `description` field, and `Operation` gained `description` and `reply`. Both are `Option<_>`, and `Channel` now derives `Default` (as `Operation` already did), so deserialization, `..Default::default()`, and read-only access compile unchanged. **If you construct `Channel` or `Operation` with an explicit struct literal**, add the new fields or use the spread:
+
+```rust
+let channel = asyncapi_rust::Channel {
+    address: Some("/ws/chat".to_string()),
+    messages: None,
+    parameters: None,
+    ..Default::default()
+};
+```
+
+`description` on `#[asyncapi_channel(...)]` and `#[asyncapi_operation(...)]` was previously accepted and silently discarded; it is now emitted. If you had descriptions on those attributes, they will start appearing in the generated document.
+
+Generated payload schemas for **internally-tagged newtype enum variants** now carry their tag discriminant. Previously a variant like `UserJoin(UserJoin)` produced a bare `{"$ref": "..."}`, omitting the `"type": {"const": "user.join"}` that serde actually puts on the wire; it now emits the `$ref` alongside the tag property, as JSON Schema 2020-12 allows. Consumers validating against the old schema were accepting messages without checking the discriminant.
 
 ## Migrating from 0.4.x
 
@@ -255,6 +276,39 @@ Both messages appear in `components.messages` under distinct keys (`GetInfo` and
 - `message_name = "CustomName"`: Override the default (variant ident) for a single variant
 - An empty serde rename (`#[serde(rename = "")]`) automatically falls back to the variant identifier — no override needed
 
+### Request/Reply Operations
+
+Operations that expect an answer describe it with `reply(...)`:
+
+```rust
+#[derive(AsyncApi)]
+#[asyncapi(title = "Reply API", version = "1.0.0")]
+#[asyncapi_channel(name = "ask", address = "/ask", description = "Incoming questions")]
+#[asyncapi_channel(name = "answers", address = "/answers")]
+#[asyncapi_operation(
+    name = "askQuestion",
+    action = "send",
+    channel = "ask",
+    description = "Ask a question and await the answer",
+    messages = [Question],
+    reply(
+        channel = "answers",
+        address(location = "$message.header#/replyTo", description = "Where to answer"),
+        messages = [Answer]
+    )
+)]
+struct ChatApi;
+```
+
+`reply(...)` accepts:
+- `channel`: The channel the reply is sent to. Must be a declared channel — an unknown name is a compile error.
+- `address(location, description)`: A runtime expression for the reply destination. `location` is required when `address` is given.
+- `messages`: Message types the reply may carry. Requires `channel`, since replies reference the reply channel's messages.
+
+At least one of `channel` or `address` is required. Reply message types are added to the reply channel and to `components.messages` automatically, so the generated `$ref`s all resolve.
+
+`description` is also accepted on `#[asyncapi_channel(...)]` and `#[asyncapi_operation(...)]` and emitted on the corresponding object.
+
 ## Examples
 
 See working examples in the `examples/` directory:
@@ -264,6 +318,7 @@ See working examples in the `examples/` directory:
 - **`message_integration.rs`** - Automatic message integration with `#[asyncapi_messages(...)]`
 - **`server_variables.rs`** - Server variables and channel parameters for dynamic paths
 - **`mqtt_bindings.rs`** - MQTT server, operation, and message protocol bindings
+- **`request_reply.rs`** - Request/reply operations with `reply(...)`
 - **`asyncapi_derive.rs`** - Using `#[derive(AsyncApi)]` for specs
 - **`full_asyncapi_derive.rs`** - Complete spec with servers, channels, operations
 - **`generate_spec_file.rs`** - Generating specification files
