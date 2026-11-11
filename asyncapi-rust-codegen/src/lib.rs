@@ -440,6 +440,11 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
         // const _: () scopes the helper so it doesn't leak into the user's namespace
         const _: () = {
             /// Rewrites schemars' `#/$defs/X` refs to `#/components/schemas/X` in-place.
+            ///
+            /// A `$ref` with sibling keywords is moved into an `allOf`: schemars emits
+            /// `{"$ref": ..., "properties": {tag}}` for newtype variants of internally
+            /// tagged enums, but `Schema::Reference` keeps only the `$ref`, and AsyncAPI's
+            /// default schema format (JSON Schema Draft 07) ignores siblings of `$ref`.
             fn rewrite_defs_refs(value: &mut serde_json::Value) {
                 match value {
                     serde_json::Value::Object(map) => {
@@ -449,6 +454,17 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                                     *r = serde_json::Value::String(
                                         format!("#/components/schemas/{}", name)
                                     );
+                                }
+                            }
+                        }
+                        if map.len() > 1 {
+                            if let Some(r) = map.remove("$ref") {
+                                let reference = serde_json::json!({ "$ref": r });
+                                match map.get_mut("allOf").and_then(|a| a.as_array_mut()) {
+                                    Some(all_of) => all_of.insert(0, reference),
+                                    None => {
+                                        map.insert("allOf".to_string(), serde_json::json!([reference]));
+                                    }
                                 }
                             }
                         }

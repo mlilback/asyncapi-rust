@@ -1150,3 +1150,50 @@ fn test_adjacently_tagged_enum() {
         "discriminant 'data' must appear in Data payload schema"
     );
 }
+
+// Newtype variants of an internally tagged enum keep the tag in their payload (#18)
+#[test]
+fn test_newtype_variant_keeps_tag() {
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    pub struct UserJoin {
+        username: String,
+        room: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum ChatMessage {
+        #[serde(rename = "chat")]
+        Chat { text: String },
+        #[serde(rename = "user.join")]
+        UserJoin(UserJoin),
+    }
+
+    let messages = ChatMessage::asyncapi_messages();
+    let join = serde_json::to_value(&messages[1].payload).unwrap();
+
+    // The referenced schema is still there...
+    let refs: Vec<&str> = join["allOf"]
+        .as_array()
+        .expect("newtype payload is an allOf")
+        .iter()
+        .filter_map(|s| s.get("$ref").and_then(|r| r.as_str()))
+        .collect();
+    assert_eq!(refs, ["#/components/schemas/UserJoin"]);
+
+    // ...and so is the tag serde writes on the wire.
+    assert_eq!(
+        join.pointer("/properties/type/const")
+            .and_then(|v| v.as_str()),
+        Some("user.join")
+    );
+    assert_eq!(join["required"], serde_json::json!(["type"]));
+
+    // Control: serde does write that tag on the wire for a newtype variant.
+    let wire = serde_json::to_value(ChatMessage::UserJoin(UserJoin {
+        username: "ana".into(),
+        room: "general".into(),
+    }))
+    .unwrap();
+    assert_eq!(wire["type"], "user.join");
+}
