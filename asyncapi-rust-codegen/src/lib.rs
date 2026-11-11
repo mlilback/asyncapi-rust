@@ -191,7 +191,9 @@ mod serde_attrs;
 
 use asyncapi_attrs::extract_asyncapi_meta;
 use asyncapi_spec_attrs::extract_asyncapi_spec_meta;
-use serde_attrs::{extract_serde_rename, extract_serde_tag};
+use serde_attrs::{
+    apply_rename_all, extract_serde_rename, extract_serde_rename_all, extract_serde_tag,
+};
 
 /// Derive macro for generating AsyncAPI message metadata
 ///
@@ -216,6 +218,7 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
 
     // Extract serde tag attribute from enum
     let tag_field = extract_serde_tag(&input.attrs);
+    let rename_all = extract_serde_rename_all(&input.attrs);
 
     // Struct to hold message metadata
     struct MessageMeta {
@@ -243,8 +246,14 @@ pub fn derive_to_asyncapi_message(input: TokenStream) -> TokenStream {
                 let variant_name = &variant.ident;
                 let variant_ident_str = variant_name.to_string();
 
-                // Wire discriminant: serde rename if present (even if empty), else variant ident.
+                // Wire discriminant: serde rename if present (even if empty), else the
+                // container's rename_all rule applied to the variant ident, else the ident.
                 let discriminant = extract_serde_rename(&variant.attrs)
+                    .or_else(|| {
+                        rename_all
+                            .as_deref()
+                            .and_then(|rule| apply_rename_all(rule, &variant_ident_str))
+                    })
                     .unwrap_or_else(|| variant_ident_str.clone());
 
                 // Extract asyncapi metadata
