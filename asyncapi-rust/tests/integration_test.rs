@@ -204,6 +204,50 @@ fn test_per_variant_schema_non_type_tag() {
     assert!(cl_json.pointer("/properties/project_id").is_none());
 }
 
+// Variants named only through the container's `rename_all` still get per-variant schemas
+#[test]
+fn test_per_variant_schema_rename_all() {
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "action", rename_all = "snake_case")]
+    pub enum Command {
+        NextTrack { target: String },
+        SetVolume { target: String, volume: f32 },
+    }
+
+    // Same enum with the keys in the other order
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(rename_all = "snake_case", tag = "action")]
+    pub enum CommandReordered {
+        NextTrack { target: String },
+        SetVolume { target: String, volume: f32 },
+    }
+
+    assert_per_variant(Command::asyncapi_messages());
+    assert_per_variant(CommandReordered::asyncapi_messages());
+}
+
+fn assert_per_variant(messages: Vec<asyncapi_rust::Message>) {
+    assert_eq!(messages.len(), 2);
+
+    let next_track = serde_json::to_value(&messages[0].payload).unwrap();
+    let set_volume = serde_json::to_value(&messages[1].payload).unwrap();
+
+    assert!(next_track.get("oneOf").is_none());
+    assert!(set_volume.get("oneOf").is_none());
+    assert_eq!(
+        next_track
+            .pointer("/properties/action/const")
+            .and_then(|v| v.as_str()),
+        Some("next_track")
+    );
+    assert_eq!(
+        set_volume
+            .pointer("/properties/action/const")
+            .and_then(|v| v.as_str()),
+        Some("set_volume")
+    );
+}
+
 #[test]
 fn test_asyncapi_attributes() {
     let messages = DocumentedMessage::asyncapi_messages();
@@ -1105,4 +1149,51 @@ fn test_adjacently_tagged_enum() {
         data_str.contains("data"),
         "discriminant 'data' must appear in Data payload schema"
     );
+}
+
+// Newtype variants of an internally tagged enum keep the tag in their payload (#18)
+#[test]
+fn test_newtype_variant_keeps_tag() {
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    pub struct UserJoin {
+        username: String,
+        room: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema, ToAsyncApiMessage)]
+    #[serde(tag = "type")]
+    pub enum ChatMessage {
+        #[serde(rename = "chat")]
+        Chat { text: String },
+        #[serde(rename = "user.join")]
+        UserJoin(UserJoin),
+    }
+
+    let messages = ChatMessage::asyncapi_messages();
+    let join = serde_json::to_value(&messages[1].payload).unwrap();
+
+    // The referenced schema is still there...
+    let refs: Vec<&str> = join["allOf"]
+        .as_array()
+        .expect("newtype payload is an allOf")
+        .iter()
+        .filter_map(|s| s.get("$ref").and_then(|r| r.as_str()))
+        .collect();
+    assert_eq!(refs, ["#/components/schemas/UserJoin"]);
+
+    // ...and so is the tag serde writes on the wire.
+    assert_eq!(
+        join.pointer("/properties/type/const")
+            .and_then(|v| v.as_str()),
+        Some("user.join")
+    );
+    assert_eq!(join["required"], serde_json::json!(["type"]));
+
+    // Control: serde does write that tag on the wire for a newtype variant.
+    let wire = serde_json::to_value(ChatMessage::UserJoin(UserJoin {
+        username: "ana".into(),
+        room: "general".into(),
+    }))
+    .unwrap();
+    assert_eq!(wire["type"], "user.join");
 }
