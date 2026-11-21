@@ -1106,3 +1106,57 @@ fn test_adjacently_tagged_enum() {
         "discriminant 'data' must appear in Data payload schema"
     );
 }
+
+#[test]
+fn test_channel_and_operation_descriptions() {
+    #[allow(clippy::duplicated_attributes)]
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Chat API", version = "1.0.0")]
+    #[asyncapi_channel(
+        name = "chat",
+        address = "/ws/chat",
+        description = "Messages for every room"
+    )]
+    #[asyncapi_channel(name = "status", address = "/ws/status")]
+    #[asyncapi_operation(
+        name = "sendMessage",
+        action = "send",
+        channel = "chat",
+        description = "Send a message to a room"
+    )]
+    #[asyncapi_operation(name = "receiveStatus", action = "receive", channel = "status")]
+    struct ChatApi;
+
+    let spec = ChatApi::asyncapi_spec();
+
+    let channels = spec.channels.as_ref().expect("Should have channels");
+    assert_eq!(
+        channels["chat"].description.as_deref(),
+        Some("Messages for every room")
+    );
+    assert_eq!(channels["status"].description, None);
+
+    let operations = spec.operations.as_ref().expect("Should have operations");
+    assert_eq!(
+        operations["sendMessage"].description.as_deref(),
+        Some("Send a message to a room")
+    );
+    assert_eq!(operations["receiveStatus"].description, None);
+
+    // Serialized as AsyncAPI 3.0 `description`, and left out when unset.
+    let json = serde_json::to_value(&spec).unwrap();
+    assert_eq!(
+        json["channels"]["chat"]["description"],
+        "Messages for every room"
+    );
+    assert_eq!(
+        json["operations"]["sendMessage"]["description"],
+        "Send a message to a room"
+    );
+    assert!(json["channels"]["status"].get("description").is_none());
+    assert!(
+        json["operations"]["receiveStatus"]
+            .get("description")
+            .is_none()
+    );
+}

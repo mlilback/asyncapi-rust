@@ -126,6 +126,7 @@
 //!
 //! - `name = "..."` - Channel identifier (required)
 //! - `address = "..."` - Channel path/address (optional)
+//! - `description = "..."` - Channel description (optional)
 //!
 //! ### `#[asyncapi_operation(...)]`
 //!
@@ -134,6 +135,7 @@
 //! - `name = "..."` - Operation identifier (required)
 //! - `action = "send"|"receive"` - Operation type (required)
 //! - `channel = "..."` - Channel reference (required)
+//! - `description = "..."` - Operation description (optional)
 //! - `messages = [Type1, Type2, ...]` - Message types available for this operation (optional)
 //!
 //! When the `messages` parameter is specified on operations, those messages are automatically
@@ -875,6 +877,11 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
             } else {
                 quote! { None }
             };
+            let description = if let Some(desc) = &channel.description {
+                quote! { Some(#desc.to_string()) }
+            } else {
+                quote! { None }
+            };
 
             // Generate channel parameters
             let parameters = if channel.parameters.is_empty() {
@@ -980,6 +987,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     #name.to_string(),
                     asyncapi_rust::Channel {
                         address: #address,
+                        description: #description,
                         messages: #messages_field,
                         parameters: #parameters,
                     }
@@ -1020,6 +1028,12 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 )
                 .to_compile_error();
             }
+
+            let description = if let Some(desc) = &operation.description {
+                quote! { Some(#desc.to_string()) }
+            } else {
+                quote! { None }
+            };
 
             // Convert action string to OperationAction enum
             let action_enum = if action == "send" {
@@ -1137,6 +1151,7 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         channel: asyncapi_rust::ChannelRef {
                             reference: format!("#/channels/{}", #channel_ref),
                         },
+                        description: #description,
                         messages: #messages_field,
                         bindings: #bindings
                     }

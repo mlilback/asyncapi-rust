@@ -142,6 +142,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
         "chat".to_string(),
         Channel {
             address: Some("/ws/chat".to_string()),
+            description: Some("Chat messages for every room".to_string()),
             messages: None, // Messages defined in components
             parameters: None,
         },
@@ -157,6 +158,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
             channel: asyncapi_rust::ChannelRef {
                 reference: "#/channels/chat".to_string(),
             },
+            description: None,
             messages: Some(
                 messages
                     .iter()
@@ -180,6 +182,7 @@ fn build_asyncapi_spec(messages: Vec<Message>) -> AsyncApiSpec {
             channel: asyncapi_rust::ChannelRef {
                 reference: "#/channels/chat".to_string(),
             },
+            description: None,
             messages: Some(
                 messages
                     .iter()

@@ -328,6 +328,7 @@ pub struct ServerVariable {
 ///
 /// let channel = Channel {
 ///     address: Some("/ws/chat/{userId}".to_string()),
+///     description: Some("Messages for one user".to_string()),
 ///     messages: None,
 ///     parameters: Some(parameters),
 /// };
@@ -341,6 +342,12 @@ pub struct Channel {
     /// topic name, queue name, or method path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
+
+    /// Channel description
+    ///
+    /// A longer description of the channel. CommonMark syntax can be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 
     /// Messages available on this channel
     ///
@@ -604,6 +611,12 @@ pub struct Operation {
     ///
     /// Points to the channel where this operation takes place
     pub channel: ChannelRef,
+
+    /// Operation description
+    ///
+    /// A longer description of the operation. CommonMark syntax can be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 
     /// Messages for this operation
     ///
