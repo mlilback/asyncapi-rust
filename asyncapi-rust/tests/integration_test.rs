@@ -1160,3 +1160,33 @@ fn test_channel_and_operation_descriptions() {
             .is_none()
     );
 }
+
+#[test]
+fn test_channel_and_operation_titles_and_summaries() {
+    #[derive(AsyncApi)]
+    #[asyncapi(title = "Chat API", version = "1.0.0")]
+    #[asyncapi_channel(
+        name = "chat",
+        address = "/ws/chat",
+        title = "Chat",
+        summary = "Every room's messages"
+    )]
+    #[asyncapi_operation(
+        name = "sendMessage",
+        action = "send",
+        channel = "chat",
+        title = "Send a message",
+        summary = "Post to a room"
+    )]
+    struct ChatApi;
+
+    let json = serde_json::to_value(ChatApi::asyncapi_spec()).unwrap();
+    assert_eq!(json["channels"]["chat"]["title"], "Chat");
+    assert_eq!(json["channels"]["chat"]["summary"], "Every room's messages");
+    assert_eq!(json["operations"]["sendMessage"]["title"], "Send a message");
+    assert_eq!(
+        json["operations"]["sendMessage"]["summary"],
+        "Post to a room"
+    );
+    assert!(json["channels"]["chat"].get("description").is_none());
+}
