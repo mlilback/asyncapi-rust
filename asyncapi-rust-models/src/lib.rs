@@ -328,6 +328,9 @@ pub struct ServerVariable {
 ///
 /// let channel = Channel {
 ///     address: Some("/ws/chat/{userId}".to_string()),
+///     title: None,
+///     summary: Some("A user's chat".to_string()),
+///     description: Some("Messages for one user".to_string()),
 ///     messages: None,
 ///     parameters: Some(parameters),
 /// };
@@ -341,6 +344,24 @@ pub struct Channel {
     /// topic name, queue name, or method path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
+
+    /// Channel title
+    ///
+    /// A human-friendly title for the channel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Channel summary
+    ///
+    /// A short summary of the channel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+
+    /// Channel description
+    ///
+    /// A longer description of the channel. CommonMark syntax can be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 
     /// Messages available on this channel
     ///
@@ -604,6 +625,24 @@ pub struct Operation {
     ///
     /// Points to the channel where this operation takes place
     pub channel: ChannelRef,
+
+    /// Operation title
+    ///
+    /// A human-friendly title for the operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Operation summary
+    ///
+    /// A short summary of what the operation is about.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+
+    /// Operation description
+    ///
+    /// A longer description of the operation. CommonMark syntax can be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 
     /// Messages for this operation
     ///

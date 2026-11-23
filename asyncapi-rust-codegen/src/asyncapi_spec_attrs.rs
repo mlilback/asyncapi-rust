@@ -66,7 +66,8 @@ pub struct ServerVariableMeta {
 pub struct ChannelMeta {
     pub name: String,
     pub address: Option<String>,
-    #[allow(dead_code)] // Reserved for future use
+    pub title: Option<String>,
+    pub summary: Option<String>,
     pub description: Option<String>,
     pub parameters: Vec<ParameterMeta>,
 }
@@ -88,7 +89,8 @@ pub struct OperationMeta {
     pub name: String,
     pub action: String, // "send" or "receive"
     pub channel: String,
-    #[allow(dead_code)] // Reserved for future use
+    pub title: Option<String>,
+    pub summary: Option<String>,
     pub description: Option<String>,
     pub messages: Vec<Path>,
     pub mqtt: Option<OperationMqttBindingsMeta>,
@@ -384,6 +386,8 @@ fn extract_server_variable(
 fn extract_channel(attr: &Attribute) -> syn::Result<Option<ChannelMeta>> {
     let mut name = None;
     let mut address = None;
+    let mut title = None;
+    let mut summary = None;
     let mut description = None;
     let mut parameters = Vec::new();
 
@@ -396,6 +400,14 @@ fn extract_channel(attr: &Attribute) -> syn::Result<Option<ChannelMeta>> {
             let value = nested.value()?;
             let s: syn::LitStr = value.parse()?;
             address = Some(s.value());
+        } else if nested.path.is_ident("title") {
+            let value = nested.value()?;
+            let s: syn::LitStr = value.parse()?;
+            title = Some(s.value());
+        } else if nested.path.is_ident("summary") {
+            let value = nested.value()?;
+            let s: syn::LitStr = value.parse()?;
+            summary = Some(s.value());
         } else if nested.path.is_ident("description") {
             let value = nested.value()?;
             let s: syn::LitStr = value.parse()?;
@@ -416,6 +428,8 @@ fn extract_channel(attr: &Attribute) -> syn::Result<Option<ChannelMeta>> {
     Ok(Some(ChannelMeta {
         name,
         address,
+        title,
+        summary,
         description,
         parameters,
     }))
@@ -525,6 +539,8 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
     let mut name = None;
     let mut action = None;
     let mut channel = None;
+    let mut title = None;
+    let mut summary = None;
     let mut description = None;
     let mut messages = Vec::new();
     let mut mqtt = None;
@@ -542,6 +558,14 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
             let value = nested.value()?;
             let s: syn::LitStr = value.parse()?;
             channel = Some(s.value());
+        } else if nested.path.is_ident("title") {
+            let value = nested.value()?;
+            let s: syn::LitStr = value.parse()?;
+            title = Some(s.value());
+        } else if nested.path.is_ident("summary") {
+            let value = nested.value()?;
+            let s: syn::LitStr = value.parse()?;
+            summary = Some(s.value());
         } else if nested.path.is_ident("description") {
             let value = nested.value()?;
             let s: syn::LitStr = value.parse()?;
@@ -568,6 +592,8 @@ fn extract_operation(attr: &Attribute) -> syn::Result<Option<OperationMeta>> {
         name,
         action,
         channel,
+        title,
+        summary,
         description,
         messages,
         mqtt,

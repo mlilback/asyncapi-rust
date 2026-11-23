@@ -126,6 +126,9 @@
 //!
 //! - `name = "..."` - Channel identifier (required)
 //! - `address = "..."` - Channel path/address (optional)
+//! - `title = "..."` - Channel title (optional)
+//! - `summary = "..."` - Channel summary (optional)
+//! - `description = "..."` - Channel description (optional)
 //!
 //! ### `#[asyncapi_operation(...)]`
 //!
@@ -134,6 +137,9 @@
 //! - `name = "..."` - Operation identifier (required)
 //! - `action = "send"|"receive"` - Operation type (required)
 //! - `channel = "..."` - Channel reference (required)
+//! - `title = "..."` - Operation title (optional)
+//! - `summary = "..."` - Operation summary (optional)
+//! - `description = "..."` - Operation description (optional)
 //! - `messages = [Type1, Type2, ...]` - Message types available for this operation (optional)
 //!
 //! When the `messages` parameter is specified on operations, those messages are automatically
@@ -875,6 +881,9 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
             } else {
                 quote! { None }
             };
+            let title = optional_string(&channel.title);
+            let summary = optional_string(&channel.summary);
+            let description = optional_string(&channel.description);
 
             // Generate channel parameters
             let parameters = if channel.parameters.is_empty() {
@@ -980,6 +989,9 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                     #name.to_string(),
                     asyncapi_rust::Channel {
                         address: #address,
+                        title: #title,
+                        summary: #summary,
+                        description: #description,
                         messages: #messages_field,
                         parameters: #parameters,
                     }
@@ -1020,6 +1032,10 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                 )
                 .to_compile_error();
             }
+
+            let title = optional_string(&operation.title);
+            let summary = optional_string(&operation.summary);
+            let description = optional_string(&operation.description);
 
             // Convert action string to OperationAction enum
             let action_enum = if action == "send" {
@@ -1137,6 +1153,9 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
                         channel: asyncapi_rust::ChannelRef {
                             reference: format!("#/channels/{}", #channel_ref),
                         },
+                        title: #title,
+                        summary: #summary,
+                        description: #description,
                         messages: #messages_field,
                         bindings: #bindings
                     }
@@ -1228,6 +1247,14 @@ pub fn derive_asyncapi(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// `Some("...".to_string())` for a set attribute, `None` otherwise.
+fn optional_string(value: &Option<String>) -> proc_macro2::TokenStream {
+    match value {
+        Some(s) => quote! { Some(#s.to_string()) },
+        None => quote! { None },
+    }
 }
 
 #[cfg(test)]
