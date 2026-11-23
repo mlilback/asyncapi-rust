@@ -66,7 +66,6 @@ pub struct ServerVariableMeta {
 pub struct ChannelMeta {
     pub name: String,
     pub address: Option<String>,
-    #[allow(dead_code)] // Reserved for future use
     pub description: Option<String>,
     pub parameters: Vec<ParameterMeta>,
 }
@@ -88,7 +87,6 @@ pub struct OperationMeta {
     pub name: String,
     pub action: String, // "send" or "receive"
     pub channel: String,
-    #[allow(dead_code)] // Reserved for future use
     pub description: Option<String>,
     pub messages: Vec<Path>,
     pub mqtt: Option<OperationMqttBindingsMeta>,
